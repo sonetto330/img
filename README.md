@@ -40,6 +40,8 @@ cd home
 
 把 `.env.example` 复制一份改名为 `.env`，用记事本打开，把 `ACCESS_TOKEN` 改成自己编的口令。
 
+**国内网络注意**：黑窗口里的程序默认不走梯子，直连 Anthropic 会报 `403 Request not allowed`。要么把梯子开成 TUN 模式（全局接管，推荐），要么把 `.env` 里 `HTTPS_PROXY` / `HTTP_PROXY` 两行的 `#` 去掉并改成梯子的本地端口（Clash 一般 7890，v2rayN 一般 10808）。
+
 ### 5. 启动
 
 双击 `start.bat`（第一次会自动装依赖，等一会儿）。看到「家开门了」就成了。
