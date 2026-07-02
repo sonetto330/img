@@ -26,6 +26,19 @@ fs.mkdirSync(WORKSPACE, { recursive: true });
 const store = new SessionStore(DATA_DIR);
 const publicDir = path.join(root, "public");
 
+// 人设：优先用工作目录里的 CLAUDE.md，没有就用项目根目录那份。
+// 每轮都重新读，改了人设不用重启服务。
+function loadPersona(): string | undefined {
+  for (const p of [path.join(WORKSPACE, "CLAUDE.md"), path.join(root, "CLAUDE.md")]) {
+    try {
+      return fs.readFileSync(p, "utf8");
+    } catch {
+      /* 试下一个 */
+    }
+  }
+  return undefined;
+}
+
 const MIME: Record<string, string> = {
   ".html": "text/html; charset=utf-8",
   ".js": "text/javascript; charset=utf-8",
@@ -120,6 +133,7 @@ wss.on("connection", (ws: WebSocket, req) => {
         resume: record.claudeSessionId,
         cwd: WORKSPACE,
         permissionMode: PERMISSION_MODE,
+        persona: loadPersona(),
       },
       {
         onClaudeSession(claudeSessionId) {

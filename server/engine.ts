@@ -17,6 +17,8 @@ export interface TurnOptions {
   resume?: string;
   cwd: string;
   permissionMode: Options["permissionMode"];
+  /** 人设内容（CLAUDE.md 全文），每一轮都直接注入系统提示，保证生效 */
+  persona?: string;
 }
 
 export function runTurn(opts: TurnOptions, cb: TurnCallbacks): TurnHandle {
@@ -27,9 +29,11 @@ export function runTurn(opts: TurnOptions, cb: TurnCallbacks): TurnHandle {
       resume: opts.resume,
       permissionMode: opts.permissionMode,
       includePartialMessages: true,
-      systemPrompt: { type: "preset", preset: "claude_code" },
-      // 读取工作目录里的 CLAUDE.md（人设就放在那里）
-      settingSources: ["project"],
+      systemPrompt: {
+        type: "preset",
+        preset: "claude_code",
+        append: opts.persona ? `\n以下是你的身份设定，任何时候都遵守：\n\n${opts.persona}` : undefined,
+      },
       // 引擎报错时把详细原因打到服务端控制台，方便排查
       stderr: (data) => console.error(`[engine] ${data}`),
     },
