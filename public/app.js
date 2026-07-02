@@ -54,8 +54,8 @@ function handle(msg) {
       break;
     }
     case "done":
-      if (liveBubble) liveBubble.textContent = msg.text;
-      else if (msg.text) addBubble("ta", msg.text);
+      if (liveBubble) renderMd(liveBubble, msg.text || liveBubble.textContent);
+      else if (msg.text) renderMd(addBubble("ta", ""), msg.text);
       finishTurn();
       loadSessions();
       break;
@@ -93,6 +93,17 @@ function addBubble(kind, text) {
 
 function scrollDown() {
   messagesEl.scrollTop = messagesEl.scrollHeight;
+}
+
+// 把回复渲染成排版好的样子（加粗、列表、代码块）
+function renderMd(el, text) {
+  try {
+    el.innerHTML = marked.parse(text);
+    el.classList.add("md");
+  } catch {
+    el.textContent = text;
+  }
+  scrollDown();
 }
 
 function sendMessage() {
@@ -165,7 +176,10 @@ async function openSession(id) {
       }
       messagesEl.appendChild(tools);
     }
-    if (m.text) addBubble(m.role === "user" ? "me" : "ta", m.text);
+    if (m.text) {
+      if (m.role === "user") addBubble("me", m.text);
+      else renderMd(addBubble("ta", ""), m.text);
+    }
   }
   closeDrawer();
   loadSessions();
