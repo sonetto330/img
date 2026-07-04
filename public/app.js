@@ -278,14 +278,88 @@ async function loadSessions() {
   listEl.innerHTML = "";
   for (const s of sessions) {
     const li = document.createElement("li");
-    li.textContent = s.title;
+    const info = document.createElement("div");
+    info.className = "sess-info";
+    const title = document.createElement("div");
+    title.className = "sess-title";
+    title.textContent = s.title;
     const t = document.createElement("time");
     t.textContent = new Date(s.updatedAt).toLocaleString("zh-CN");
-    li.appendChild(t);
+    info.append(title, t);
+    li.appendChild(info);
+
+    const more = document.createElement("button");
+    more.className = "sess-more";
+    more.textContent = "⋯";
+    more.setAttribute("aria-label", "更多");
+    more.onclick = (e) => {
+      e.stopPropagation();
+      openSessMenu(s, li);
+    };
+    li.appendChild(more);
+
     if (s.id === sessionId) li.classList.add("active");
     li.onclick = () => openSession(s.id);
     listEl.appendChild(li);
   }
+}
+
+// —— 会话行操作菜单 ——
+let openMenu = null;
+function closeSessMenu() {
+  openMenu?.remove();
+  openMenu = null;
+}
+function openSessMenu(sess, anchor) {
+  closeSessMenu();
+  const menu = document.createElement("div");
+  menu.className = "sess-menu";
+  const rename = document.createElement("button");
+  rename.textContent = "改名";
+  rename.onclick = (e) => {
+    e.stopPropagation();
+    closeSessMenu();
+    doRename(sess);
+  };
+  const del = document.createElement("button");
+  del.className = "danger";
+  del.textContent = "删除";
+  del.onclick = (e) => {
+    e.stopPropagation();
+    closeSessMenu();
+    doDelete(sess);
+  };
+  menu.append(rename, del);
+  anchor.appendChild(menu);
+  openMenu = menu;
+  // 点别处关掉
+  setTimeout(() => document.addEventListener("click", closeSessMenu, { once: true }), 0);
+}
+
+async function doRename(sess) {
+  const title = (prompt("改成什么标题？", sess.title) || "").trim();
+  if (!title || title === sess.title) return;
+  const res = await fetch(`/api/sessions/${sess.id}/rename?token=${encodeURIComponent(token)}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ title }),
+  });
+  if (!res.ok) return addBubble("error", "改名失败");
+  loadSessions();
+}
+
+async function doDelete(sess) {
+  if (!confirm(`删除会话「${sess.title}」？删了找不回来。`)) return;
+  const res = await fetch(`/api/sessions/${sess.id}?token=${encodeURIComponent(token)}`, {
+    method: "DELETE",
+  });
+  if (!res.ok) return addBubble("error", "删除失败");
+  if (sess.id === sessionId) {
+    sessionId = null;
+    localStorage.removeItem("home_session");
+    messagesEl.innerHTML = "";
+  }
+  loadSessions();
 }
 
 async function openSession(id) {

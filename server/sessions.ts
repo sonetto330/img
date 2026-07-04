@@ -68,6 +68,23 @@ export class SessionStore {
     fs.writeFileSync(this.file(record.id), JSON.stringify(record, null, 2));
   }
 
+  delete(id: string): boolean {
+    try {
+      fs.unlinkSync(this.file(id));
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  rename(id: string, title: string): SessionRecord | null {
+    const record = this.get(id);
+    if (!record) return null;
+    record.title = title.slice(0, 60) || record.title;
+    this.save(record);
+    return record;
+  }
+
   list(): Array<Pick<SessionRecord, "id" | "title" | "updatedAt">> {
     const out: Array<Pick<SessionRecord, "id" | "title" | "updatedAt">> = [];
     for (const name of fs.readdirSync(this.dir)) {

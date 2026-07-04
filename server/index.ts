@@ -118,8 +118,34 @@ const server = http.createServer((req, res) => {
   const sessionMatch = url.pathname.match(/^\/api\/sessions\/([0-9a-f-]{36})$/);
   if (sessionMatch) {
     if (!authed(url)) return sendJson(res, 401, { error: "口令不对" });
+    if (req.method === "DELETE") {
+      return store.delete(sessionMatch[1])
+        ? sendJson(res, 200, { ok: true })
+        : sendJson(res, 404, { error: "没有这个会话" });
+    }
     const record = store.get(sessionMatch[1]);
     return record ? sendJson(res, 200, record) : sendJson(res, 404, { error: "没有这个会话" });
+  }
+  const renameMatch = url.pathname.match(/^\/api\/sessions\/([0-9a-f-]{36})\/rename$/);
+  if (renameMatch && req.method === "POST") {
+    if (!authed(url)) return sendJson(res, 401, { error: "口令不对" });
+    const chunks: Buffer[] = [];
+    req.on("data", (c: Buffer) => chunks.push(c));
+    req.on("end", () => {
+      let body: { title?: string };
+      try {
+        body = JSON.parse(Buffer.concat(chunks).toString("utf8") || "{}");
+      } catch {
+        return sendJson(res, 400, { error: "消息格式不对" });
+      }
+      const title = String(body.title || "").trim();
+      if (!title) return sendJson(res, 400, { error: "标题不能为空" });
+      const record = store.rename(renameMatch[1], title);
+      return record
+        ? sendJson(res, 200, { id: record.id, title: record.title })
+        : sendJson(res, 404, { error: "没有这个会话" });
+    });
+    return;
   }
 
   // 静态文件
