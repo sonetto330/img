@@ -81,15 +81,6 @@ header button#backHome { font-size: 18px; }
   border-bottom-left-radius: 5px;
   box-shadow: 0 1px 3px rgba(160, 90, 50, .18);
 }
-.tts-btn {
-  position: absolute; right: -4px; bottom: -12px; z-index: 1;
-  border: none; background: var(--panel); color: var(--accent);
-  font-size: 12px; line-height: 1; padding: 4px 8px; border-radius: 14px;
-  box-shadow: 0 1px 3px rgba(60, 40, 20, .16);
-  cursor: pointer; touch-action: manipulation;
-}
-.tts-btn:hover { background: var(--accent-soft); }
-.tts-btn:disabled { opacity: .6; cursor: default; }
 .msg.error { align-self: center; background: #fbe9e4; color: #a33f22; font-size: 13px; border-radius: 10px; }
 .msg.pat { align-self: center; background: none; color: var(--muted); font-size: 12px; padding: 4px 12px; }
 
