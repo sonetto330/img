@@ -8,6 +8,7 @@ import type { Options } from "@anthropic-ai/claude-agent-sdk";
 import { randomUUID } from "node:crypto";
 import { SessionStore, type Attachment } from "./sessions.js";
 import { runTurn, type TurnHandle } from "./engine.js";
+import { barkPush } from "./bark.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const root = path.join(here, "..");
@@ -171,6 +172,12 @@ const server = http.createServer((req, res) => {
 
 const wss = new WebSocketServer({ server, path: "/ws" });
 
+// 手机是否有人正盯着？连接掉了才推 Bark，别打扰她
+function anyoneWatching(): boolean {
+  for (const c of wss.clients) if (c.readyState === c.OPEN) return true;
+  return false;
+}
+
 wss.on("connection", (ws: WebSocket, req) => {
   const url = new URL(req.url || "/", `http://${req.headers.host}`);
   if (!authed(url)) {
@@ -250,10 +257,12 @@ wss.on("connection", (ws: WebSocket, req) => {
           record.messages.push({ role: "assistant", text: finalText, tools, at: new Date().toISOString() });
           store.save(record);
           send({ type: "done", text: finalText });
+          if (!anyoneWatching()) barkPush("麦穗", finalText).catch(() => {});
         },
         onError(message) {
           active = null;
           send({ type: "error", message });
+          if (!anyoneWatching()) barkPush("麦穗（出错）", message).catch(() => {});
         },
       },
     );
