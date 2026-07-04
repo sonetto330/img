@@ -250,7 +250,7 @@ wss.on("connection", (ws: WebSocket, req) => {
           cwd: WORKSPACE,
           permissionMode: PERMISSION_MODE,
           persona: loadPersona(),
-          model: "haiku",
+          model: process.env.CLAUDE_MODEL || "claude-opus-4-7",
           maxTurns: 1,
         },
         {
