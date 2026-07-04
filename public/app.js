@@ -602,15 +602,33 @@ function updateDaysTogether() {
   daysTogetherEl.textContent = days >= 0 ? days : 0;
 }
 
+async function updateWeather() {
+  try {
+    const w = await api("/api/weather");
+    // 后端返回错误时是 { error: "..." } 结构，缺 temp 就当没拿到，静默失败
+    if (!w || typeof w.temp !== "number") return;
+    $("weatherIcon").textContent = w.icon || "🌡";
+    $("weatherTemp").textContent = w.temp;
+    $("weatherHi").textContent = w.high;
+    $("weatherLo").textContent = w.low;
+    $("weatherBox").hidden = false;
+  } catch {
+    // 网络挂了不显示天气就完了，别打断首页其他内容
+  }
+}
+
 // —— 启动 ——
 showView("home");
 updateClock();
 updateDaysTogether();
+updateWeather();
 // 每分钟刷一次时钟；跨天时"在一起 X 天"也顺手刷一下
 setInterval(() => {
   updateClock();
   updateDaysTogether();
 }, 60_000);
+// 天气每 10 分钟刷一次；服务端有 15 分钟缓存，不会真的每次都戳外网
+setInterval(updateWeather, 10 * 60_000);
 
 connect();
 loadSessions();

@@ -11,6 +11,7 @@ import { runTurn, type TurnHandle } from "./engine.js";
 import { getMode, loadModePrompt, type ToolEvent } from "./modes.js";
 import { barkPush } from "./bark.js";
 import { synthesize, ttsEnabled } from "./tts.js";
+import { getWeather } from "./weather.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const root = path.join(here, "..");
@@ -141,6 +142,15 @@ const server = http.createServer((req, res) => {
       }
     });
     return;
+  }
+
+  // 首页天气：走服务端代理，Open-Meteo 免 key，缓存 15 分钟
+  if (url.pathname === "/api/weather") {
+    if (!authed(url)) return sendJson(res, 401, { error: "口令不对" });
+    return getWeather().then(
+      (w) => (w ? sendJson(res, 200, w) : sendJson(res, 502, { error: "天气拿不到" })),
+      () => sendJson(res, 502, { error: "天气拿不到" }),
+    );
   }
 
   // API：会话列表 / 会话内容（需要口令）
