@@ -508,6 +508,11 @@ function showView(name) {
   }
   if (name === "home") updateGreeting();
   if (name === "memory") loadMemoryGraph();
+  if (name === "chat") {
+    // 视图刚显示，浏览器还没做布局，scrollHeight 可能是 0。
+    // 等一帧让布局完成再贴底，否则永远停在顶。
+    requestAnimationFrame(() => requestAnimationFrame(forceScrollDown));
+  }
 }
 
 for (const btn of bottomNavEl.querySelectorAll(".nav-btn")) {
