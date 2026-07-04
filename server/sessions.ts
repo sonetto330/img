@@ -91,12 +91,18 @@ export class SessionStore {
     return record;
   }
 
-  list(): Array<Pick<SessionRecord, "id" | "title" | "mode" | "updatedAt">> {
-    const out: Array<Pick<SessionRecord, "id" | "title" | "mode" | "updatedAt">> = [];
+  list(): Array<Pick<SessionRecord, "id" | "title" | "mode" | "updatedAt"> & { messageCount: number }> {
+    const out: Array<Pick<SessionRecord, "id" | "title" | "mode" | "updatedAt"> & { messageCount: number }> = [];
     for (const name of fs.readdirSync(this.dir)) {
       if (!name.endsWith(".json")) continue;
       const record = this.get(name.slice(0, -5));
-      if (record) out.push({ id: record.id, title: record.title, mode: record.mode, updatedAt: record.updatedAt });
+      if (record) out.push({
+        id: record.id,
+        title: record.title,
+        mode: record.mode,
+        updatedAt: record.updatedAt,
+        messageCount: record.messages.length,
+      });
     }
     out.sort((a, b) => (a.updatedAt < b.updatedAt ? 1 : -1));
     return out;

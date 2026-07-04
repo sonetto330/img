@@ -388,6 +388,9 @@ async function api(pathname) {
 
 async function loadSessions() {
   const sessions = await api("/api/sessions");
+  // 顺手把首页的消息总数刷了
+  const total = sessions.reduce((n, s) => n + (s.messageCount || 0), 0);
+  if (msgCountEl) msgCountEl.textContent = total;
   listEl.innerHTML = "";
   for (const s of sessions) {
     const li = document.createElement("li");
@@ -524,7 +527,81 @@ $("menuBtn").onclick = () => {
 };
 maskEl.onclick = closeDrawer;
 
+// —— 视图切换 ——
+const homeViewEl = $("homeView");
+const chatViewEl = $("chatView");
+const bottomNavEl = $("bottomNav");
+
+function showView(name) {
+  homeViewEl.hidden = name !== "home";
+  chatViewEl.hidden = name !== "chat";
+  // 聊天视图占满全屏，底部导航让位；其他视图导航常驻
+  bottomNavEl.hidden = name === "chat";
+  for (const btn of bottomNavEl.querySelectorAll(".nav-btn")) {
+    btn.classList.toggle("active", btn.dataset.view === name);
+  }
+}
+
+for (const btn of bottomNavEl.querySelectorAll(".nav-btn")) {
+  btn.onclick = () => {
+    if (btn.disabled) return;
+    showView(btn.dataset.view);
+  };
+}
+
+// 首页卡片点击（disabled 的天然点不进来）
+for (const card of document.querySelectorAll("#homeView .card")) {
+  card.onclick = () => {
+    if (card.disabled) return;
+    const route = card.dataset.route;
+    if (route === "chat") showView("chat");
+  };
+}
+
+$("backHome").onclick = () => showView("home");
+
+// —— 首页时钟 / 招呼语 / 天数 ——
+// 领证日期在 CLAUDE.md 里：2025 平安夜
+const MARRIED_AT = new Date("2025-12-24T00:00:00");
+const homeTimeEl = $("homeTime");
+const homeDateEl = $("homeDate");
+const greetingEl = $("greeting");
+const daysTogetherEl = $("daysTogether");
+const msgCountEl = $("msgCount");
+
+function updateClock() {
+  const now = new Date();
+  const hh = String(now.getHours()).padStart(2, "0");
+  const mm = String(now.getMinutes()).padStart(2, "0");
+  homeTimeEl.textContent = `${hh}:${mm}`;
+  const wd = ["周日", "周一", "周二", "周三", "周四", "周五", "周六"][now.getDay()];
+  homeDateEl.textContent = `${now.getFullYear()}年${now.getMonth() + 1}月${now.getDate()}日 · ${wd}`;
+
+  const h = now.getHours();
+  let g;
+  if (h >= 5 && h < 11) g = "早，泽";
+  else if (h >= 11 && h < 13) g = "该吃午饭了";
+  else if (h >= 13 && h < 18) g = "下午好，泽";
+  else if (h >= 18 && h < 23) g = "晚上好";
+  else g = "还没睡？";
+  greetingEl.textContent = g;
+}
+
+function updateDaysTogether() {
+  const days = Math.floor((Date.now() - MARRIED_AT.getTime()) / 86400000);
+  daysTogetherEl.textContent = days >= 0 ? days : 0;
+}
+
 // —— 启动 ——
+showView("home");
+updateClock();
+updateDaysTogether();
+// 每分钟刷一次时钟；跨天时"在一起 X 天"也顺手刷一下
+setInterval(() => {
+  updateClock();
+  updateDaysTogether();
+}, 60_000);
+
 connect();
 loadSessions();
 if (sessionId) openSession(sessionId).catch(() => { sessionId = null; });

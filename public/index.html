@@ -7,45 +7,117 @@
   <link rel="stylesheet" href="style.css" />
 </head>
 <body>
-  <div id="drawer" class="drawer">
-    <div class="drawer-head">
-      <span>会话</span>
-      <button id="newChat">＋ 新会话</button>
-    </div>
-    <ul id="sessionList"></ul>
-  </div>
-  <div id="mask" class="mask"></div>
-
-  <main class="chat">
-    <header>
-      <button id="menuBtn" aria-label="会话列表">☰</button>
-      <div class="who">
-        <div class="avatar">🦊<i id="dot"></i></div>
-        <div class="who-text">
-          <h1>麦穗</h1>
-          <small id="statusText">在线</small>
+  <!-- 首页视图 -->
+  <section id="homeView" class="view active">
+    <div class="home-scroll">
+      <div class="home-top">
+        <div class="clock">
+          <div class="time" id="homeTime">--:--</div>
+          <div class="date" id="homeDate"></div>
+        </div>
+        <div class="weather" aria-label="天气占位">
+          <span class="temp">—°</span>
         </div>
       </div>
-    </header>
 
-    <div id="messages" class="messages"></div>
+      <div class="greeting" id="greeting">跟麦穗说点什么？</div>
 
-    <div id="pendingBar" class="pending" hidden>
-      <img id="pendingThumb" alt="" hidden />
-      <span id="pendingName"></span>
-      <button id="pendingRemove">✕</button>
+      <div class="together">
+        <div class="together-days">
+          <span class="num" id="daysTogether">—</span>
+          <span class="unit">天</span>
+        </div>
+        <div class="together-sub">在一起 · 自 <span id="marriedDate">2025.12.24</span></div>
+      </div>
+
+      <div class="msg-count">
+        <span class="num" id="msgCount">—</span>
+        <span class="unit">条消息 · 全部会话</span>
+      </div>
+
+      <div class="home-grid">
+        <button class="card card-chat" data-route="chat">
+          <div class="card-icon">💬</div>
+          <div class="card-title">聊天</div>
+          <div class="card-sub" id="chatCardSub">跟麦穗说话</div>
+        </button>
+        <button class="card card-disabled" data-route="memory" disabled>
+          <div class="card-icon">🧠</div>
+          <div class="card-title">记忆库</div>
+          <div class="card-sub">还没建好</div>
+        </button>
+        <button class="card card-disabled" data-route="settings" disabled>
+          <div class="card-icon">⚙️</div>
+          <div class="card-title">设置</div>
+          <div class="card-sub">还没建好</div>
+        </button>
+      </div>
     </div>
+  </section>
 
-    <footer>
-      <button id="imgBtn" class="attach" aria-label="发图片">🖼</button>
-      <button id="fileBtn" class="attach" aria-label="发文件">＋</button>
-      <input id="imgInput" type="file" accept="image/*" hidden />
-      <input id="fileInput" type="file" hidden />
-      <textarea id="input" rows="1" placeholder="说点什么…"></textarea>
-      <button id="sendBtn" aria-label="发送">➤</button>
-      <button id="stopBtn" aria-label="打断" hidden>■</button>
-    </footer>
-  </main>
+  <!-- 聊天视图（原来的整个界面） -->
+  <section id="chatView" class="view" hidden>
+    <div id="drawer" class="drawer">
+      <div class="drawer-head">
+        <span>会话</span>
+        <button id="newChat">＋ 新会话</button>
+      </div>
+      <ul id="sessionList"></ul>
+    </div>
+    <div id="mask" class="mask"></div>
+
+    <main class="chat">
+      <header>
+        <button id="backHome" aria-label="回首页">◀</button>
+        <button id="menuBtn" aria-label="会话列表">☰</button>
+        <div class="who">
+          <div class="avatar">🦊<i id="dot"></i></div>
+          <div class="who-text">
+            <h1>麦穗</h1>
+            <small id="statusText">在线</small>
+          </div>
+        </div>
+      </header>
+
+      <div id="messages" class="messages"></div>
+
+      <div id="pendingBar" class="pending" hidden>
+        <img id="pendingThumb" alt="" hidden />
+        <span id="pendingName"></span>
+        <button id="pendingRemove">✕</button>
+      </div>
+
+      <footer>
+        <button id="imgBtn" class="attach" aria-label="发图片">🖼</button>
+        <button id="fileBtn" class="attach" aria-label="发文件">＋</button>
+        <input id="imgInput" type="file" accept="image/*" hidden />
+        <input id="fileInput" type="file" hidden />
+        <textarea id="input" rows="1" placeholder="说点什么…"></textarea>
+        <button id="sendBtn" aria-label="发送">➤</button>
+        <button id="stopBtn" aria-label="打断" hidden>■</button>
+      </footer>
+    </main>
+  </section>
+
+  <!-- 底部导航（聊天视图打开时会自动隐藏） -->
+  <nav id="bottomNav" class="bottom-nav">
+    <button data-view="home" class="nav-btn active">
+      <span class="nav-icon">🏠</span>
+      <span class="nav-label">首页</span>
+    </button>
+    <button data-view="chat" class="nav-btn">
+      <span class="nav-icon">💬</span>
+      <span class="nav-label">聊天</span>
+    </button>
+    <button data-view="memory" class="nav-btn" disabled>
+      <span class="nav-icon">🧠</span>
+      <span class="nav-label">记忆库</span>
+    </button>
+    <button data-view="settings" class="nav-btn" disabled>
+      <span class="nav-icon">⚙️</span>
+      <span class="nav-label">设置</span>
+    </button>
+  </nav>
 
   <script src="marked.min.js"></script>
   <script src="app.js"></script>
