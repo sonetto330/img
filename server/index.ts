@@ -5,7 +5,8 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { WebSocketServer, type WebSocket } from "ws";
 import type { Options } from "@anthropic-ai/claude-agent-sdk";
-import { SessionStore } from "./sessions.js";
+import { randomUUID } from "node:crypto";
+import { SessionStore, type Attachment } from "./sessions.js";
 import { runTurn, type TurnHandle } from "./engine.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -22,6 +23,12 @@ if (!TOKEN) {
   process.exit(1);
 }
 fs.mkdirSync(WORKSPACE, { recursive: true });
+
+// 上传的图片/文件放在工作目录里，这样他能直接用 Read 工具看
+const UPLOADS = path.join(WORKSPACE, "uploads");
+fs.mkdirSync(UPLOADS, { recursive: true });
+const MAX_UPLOAD = 30 * 1024 * 1024; // 30MB
+const IMAGE_EXT = new Set([".png", ".jpg", ".jpeg", ".gif", ".webp"]);
 
 const store = new SessionStore(DATA_DIR);
 const publicDir = path.join(root, "public");
@@ -45,6 +52,11 @@ const MIME: Record<string, string> = {
   ".css": "text/css; charset=utf-8",
   ".svg": "image/svg+xml",
   ".png": "image/png",
+  ".jpg": "image/jpeg",
+  ".jpeg": "image/jpeg",
+  ".gif": "image/gif",
+  ".webp": "image/webp",
+  ".pdf": "application/pdf",
 };
 
 function authed(url: URL): boolean {
@@ -58,6 +70,45 @@ function sendJson(res: http.ServerResponse, status: number, body: unknown): void
 
 const server = http.createServer((req, res) => {
   const url = new URL(req.url || "/", `http://${req.headers.host}`);
+
+  // 上传文件（需要口令）
+  if (url.pathname === "/api/upload" && req.method === "POST") {
+    if (!authed(url)) return sendJson(res, 401, { error: "口令不对" });
+    const original = (url.searchParams.get("name") || "文件").slice(0, 120);
+    const ext = path.extname(original).toLowerCase();
+    const saved = `${Date.now()}-${randomUUID().slice(0, 8)}${ext}`;
+    const chunks: Buffer[] = [];
+    let size = 0;
+    req.on("data", (chunk: Buffer) => {
+      size += chunk.length;
+      if (size > MAX_UPLOAD) {
+        req.destroy();
+        return sendJson(res, 413, { error: "文件太大，上限 30MB" });
+      }
+      chunks.push(chunk);
+    });
+    req.on("end", () => {
+      fs.writeFileSync(path.join(UPLOADS, saved), Buffer.concat(chunks));
+      const kind = IMAGE_EXT.has(ext) ? "image" : "file";
+      sendJson(res, 200, { file: saved, name: original, kind });
+    });
+    return;
+  }
+
+  // 取回上传过的文件（聊天记录里显示图片用，需要口令）
+  const uploadMatch = url.pathname.match(/^\/uploads\/([\w.-]+)$/);
+  if (uploadMatch) {
+    if (!authed(url)) return sendJson(res, 401, { error: "口令不对" });
+    const filePath = path.join(UPLOADS, path.basename(uploadMatch[1]));
+    return fs.readFile(filePath, (err, data) => {
+      if (err) {
+        res.writeHead(404);
+        return res.end();
+      }
+      res.writeHead(200, { "Content-Type": MIME[path.extname(filePath).toLowerCase()] || "application/octet-stream" });
+      res.end(data);
+    });
+  }
 
   // API：会话列表 / 会话内容（需要口令）
   if (url.pathname === "/api/sessions") {
@@ -104,7 +155,7 @@ wss.on("connection", (ws: WebSocket, req) => {
   };
 
   ws.on("message", (raw) => {
-    let msg: { type?: string; sessionId?: string; text?: string };
+    let msg: { type?: string; sessionId?: string; text?: string; attachments?: Attachment[] };
     try {
       msg = JSON.parse(String(raw));
     } catch {
@@ -116,20 +167,37 @@ wss.on("connection", (ws: WebSocket, req) => {
       return;
     }
 
-    if (msg.type !== "chat" || !msg.text?.trim()) return;
+    // 附件校验：只认 uploads 目录里真实存在的文件
+    const attachments: Attachment[] = (msg.attachments || [])
+      .filter((a) => a && typeof a.file === "string")
+      .map((a): Attachment => ({
+        file: path.basename(a.file),
+        name: String(a.name || a.file).slice(0, 120),
+        kind: a.kind === "image" ? "image" : "file",
+      }))
+      .filter((a) => fs.existsSync(path.join(UPLOADS, a.file)));
+
+    const text = msg.text?.trim() || "";
+    if (msg.type !== "chat" || (!text && attachments.length === 0)) return;
     if (active) return send({ type: "error", message: "上一条还在跑，等等或者先打断" });
 
     const record = (msg.sessionId && store.get(msg.sessionId)) || store.create();
     if (record.messages.length === 0) {
-      record.title = msg.text.slice(0, 24);
+      record.title = (text || attachments[0]?.name || "新会话").slice(0, 24);
     }
-    record.messages.push({ role: "user", text: msg.text, at: new Date().toISOString() });
+    record.messages.push({ role: "user", text, attachments, at: new Date().toISOString() });
     store.save(record);
     send({ type: "session", sessionId: record.id, title: record.title });
 
+    // 附件以文件路径的形式告诉他，图片他会用 Read 工具看
+    const attLines = attachments
+      .map((a) => `[泽发来${a.kind === "image" ? "一张图片" : "一个文件"}「${a.name}」，路径：${path.join(UPLOADS, a.file)}${a.kind === "image" ? "，用 Read 工具查看" : ""}]`)
+      .join("\n");
+    const prompt = attLines ? `${attLines}\n\n${text || "（没写字，看内容吧）"}` : text;
+
     active = runTurn(
       {
-        prompt: msg.text,
+        prompt,
         resume: record.claudeSessionId,
         cwd: WORKSPACE,
         permissionMode: PERMISSION_MODE,

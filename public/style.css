@@ -82,6 +82,26 @@ header button {
 .typing span:nth-child(3) { animation-delay: .4s; }
 @keyframes blink { 0%, 60%, 100% { opacity: .25; } 30% { opacity: .9; } }
 
+.pending {
+  display: flex; align-items: center; gap: 8px;
+  padding: 8px 12px; background: var(--panel); border-top: 1px solid var(--line);
+  font-size: 13px; color: var(--muted);
+}
+.pending img { width: 44px; height: 44px; object-fit: cover; border-radius: 8px; }
+.pending span { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pending button { border: none; background: none; color: var(--muted); font-size: 15px; cursor: pointer; }
+
+.msg .att-img { display: block; max-width: 100%; max-height: 320px; border-radius: 10px; margin-bottom: 6px; }
+.msg .att-file {
+  font-size: 13px; background: var(--panel); border: 1px solid var(--line);
+  border-radius: 8px; padding: 6px 10px; margin-bottom: 6px;
+}
+
+footer .attach {
+  background: none; border: 1px solid var(--line); color: var(--muted);
+  border-radius: 12px; padding: 8px 13px; font-size: 17px; line-height: 1;
+}
+
 footer {
   display: flex; gap: 8px; align-items: flex-end;
   padding: 10px 12px;

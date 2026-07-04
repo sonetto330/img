@@ -145,8 +145,11 @@ function renderMd(el, text) {
 
 function sendMessage() {
   const text = inputEl.value.trim();
-  if (!text || busy || !ws || ws.readyState !== 1) return;
-  addBubble("me", text);
+  if ((!text && !pending) || busy || !ws || ws.readyState !== 1) return;
+  const attachments = pending ? [pending] : [];
+  const bubble = addBubble("me", text);
+  if (pending) attachToBubble(bubble, pending, true);
+  clearPending();
   inputEl.value = "";
   autoGrow();
   busy = true;
@@ -154,7 +157,72 @@ function sendMessage() {
   sendBtn.hidden = true;
   stopBtn.hidden = false;
   showTyping();
-  ws.send(JSON.stringify({ type: "chat", sessionId, text }));
+  ws.send(JSON.stringify({ type: "chat", sessionId, text, attachments }));
+}
+
+// —— 附件 ——
+const attachBtn = $("attachBtn");
+const fileInput = $("fileInput");
+const pendingBar = $("pendingBar");
+const pendingThumb = $("pendingThumb");
+const pendingName = $("pendingName");
+let pending = null; // { file, name, kind }
+
+attachBtn.onclick = () => fileInput.click();
+
+fileInput.onchange = async () => {
+  const f = fileInput.files[0];
+  fileInput.value = "";
+  if (!f) return;
+  if (f.size > 30 * 1024 * 1024) return addBubble("error", "文件太大，上限 30MB");
+  pendingName.textContent = "上传中…";
+  pendingBar.hidden = false;
+  try {
+    const res = await fetch(`/api/upload?token=${encodeURIComponent(token)}&name=${encodeURIComponent(f.name)}`, {
+      method: "POST",
+      body: f,
+    });
+    if (!res.ok) throw new Error((await res.json()).error || "上传失败");
+    pending = await res.json();
+    pendingName.textContent = pending.name;
+    if (pending.kind === "image") {
+      pendingThumb.src = URL.createObjectURL(f);
+      pendingThumb.hidden = false;
+    } else {
+      pendingThumb.hidden = true;
+    }
+  } catch (e) {
+    clearPending();
+    addBubble("error", `上传失败：${e.message}`);
+  }
+};
+
+$("pendingRemove").onclick = clearPending;
+
+function clearPending() {
+  pending = null;
+  pendingBar.hidden = true;
+  pendingThumb.hidden = true;
+  pendingThumb.src = "";
+  pendingName.textContent = "";
+}
+
+// 把附件塞进气泡里显示（图片显示图，文件显示名字）
+function attachToBubble(bubble, att, before) {
+  let el;
+  if (att.kind === "image") {
+    el = document.createElement("img");
+    el.className = "att-img";
+    el.src = `/uploads/${att.file}?token=${encodeURIComponent(token)}`;
+    el.loading = "lazy";
+  } else {
+    el = document.createElement("div");
+    el.className = "att-file";
+    el.textContent = `📄 ${att.name}`;
+  }
+  if (before && bubble.firstChild) bubble.insertBefore(el, bubble.firstChild);
+  else bubble.appendChild(el);
+  scrollDown();
 }
 
 sendBtn.onclick = sendMessage;
@@ -210,9 +278,13 @@ async function openSession(id) {
       for (const tool of m.tools) addToolChip(tools, tool);
       messagesEl.appendChild(tools);
     }
-    if (m.text) {
-      if (m.role === "user") addBubble("me", m.text);
-      else renderMd(addBubble("ta", ""), m.text);
+    if (m.text || m.attachments?.length) {
+      if (m.role === "user") {
+        const bubble = addBubble("me", m.text || "");
+        for (const att of m.attachments || []) attachToBubble(bubble, att, true);
+      } else {
+        renderMd(addBubble("ta", ""), m.text);
+      }
     }
   }
   closeDrawer();

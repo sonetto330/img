@@ -25,7 +25,15 @@
 
     <div id="messages" class="messages"></div>
 
+    <div id="pendingBar" class="pending" hidden>
+      <img id="pendingThumb" alt="" hidden />
+      <span id="pendingName"></span>
+      <button id="pendingRemove">✕</button>
+    </div>
+
     <footer>
+      <button id="attachBtn" class="attach" aria-label="发图片或文件">＋</button>
+      <input id="fileInput" type="file" hidden />
       <textarea id="input" rows="1" placeholder="说点什么…"></textarea>
       <button id="sendBtn">发送</button>
       <button id="stopBtn" hidden>打断</button>

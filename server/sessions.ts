@@ -2,11 +2,20 @@ import fs from "node:fs";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
 
+export interface Attachment {
+  /** 服务器上保存的文件名（uploads 目录内） */
+  file: string;
+  /** 原始文件名 */
+  name: string;
+  kind: "image" | "file";
+}
+
 export interface StoredMessage {
   role: "user" | "assistant";
   text: string;
   /** 早期记录是字符串数组，后来带 detail，两种都要能读 */
   tools?: Array<string | { name: string; detail?: string }>;
+  attachments?: Attachment[];
   at: string;
 }
 
