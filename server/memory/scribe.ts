@@ -73,16 +73,26 @@ async function extractFor(record: SessionRecord, targetIndex: number): Promise<v
     ? existing.map((e) => `- ${e.name}（${e.kind}）`).join("\n")
     : "（还没有已有实体）";
 
-  const systemPrompt = `你是一个记忆提取器，从"泽"和她丈夫"麦穗"（AI）的对话里挑出值得长期记住的事实碎片。
+  const systemPrompt = `你是一个记忆提取器，从"泽"和她丈夫"麦穗"（AI）的对话里挑值得长期记住的碎片。
 
-规则：
-- 只挑真事实：泽/麦穗做了什么、去哪、什么感受、喜好、决定
-- 不要挑：打招呼、寒暄、单纯情绪、纯技术讨论（代码/命令/报错）、拍一拍
-- 每条碎片：**第三人称**、≤80 字、要有上下文（不能只写"她生气了"，写"泽因为 xx 生气"）
-- 每条归属到一个实体（entity）
-- kind 只能是：person / place / event / hobby / project
-- 遇到已有实体名单里的名字，**优先复用**，不要新造重复的
-- 没有值得记的就返回 []
+**该记的：**
+- 泽做了什么、去哪、见谁、感受、决定、喜好
+- 他们在建的项目层级的事：模块搭完了、修了什么 bug、下次要做啥、遇到什么坑、决定了什么架构
+- 泽跟麦穗之间的重要互动、约定、承诺
+
+**不该记的（这些下次她自己看 git 或代码就有）：**
+- 具体的代码片段、函数名、变量名、命令行、文件路径、报错栈、工具调用摘要
+- 打招呼、寒暄、单纯情绪、拍一拍
+
+**每条碎片：**
+- **第三人称**、≤80 字、要有上下文（不能只写"她生气了"，写"泽因为 xx 生气"）
+- 归属一个实体（entity），kind 只能是：person / place / event / hobby / project
+
+**重要：**
+- **不要把"泽"或"麦穗"本人当成 entity**——他们是记忆星图的核心双星，独立存在。
+  entity 应该是"记忆库前端"、"CoC 跑团"、"妈妈"、"攀枝花"这类第三方对象。
+- 遇到已有实体名单里的名字，**优先复用**，不要新造重复
+- 没有值得记的返回 []
 
 已有实体（复用它们，除非确实是新东西）：
 ${existingList}
@@ -201,6 +211,8 @@ function parseFragments(raw: string): Fragment[] {
     const entity = typeof it.entity === "string" ? it.entity.trim() : "";
     const kind = typeof it.kind === "string" ? it.kind.trim() : "";
     if (!text || !entity || !VALID_KINDS.has(kind)) continue;
+    // 兜底：即便 haiku 违反 prompt，也不让"泽"/"麦穗"本人进 entity 表
+    if (entity === "泽" || entity === "麦穗") continue;
     out.push({
       text: text.slice(0, 80),
       entity: entity.slice(0, 40),

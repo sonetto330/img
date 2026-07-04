@@ -28,16 +28,27 @@ export interface EntityDetail {
   }>;
 }
 
-/** 前端星图页拉整张图：所有实体 + 桥。数据量小（单用户，实体上限几百）直接一次全给 */
+/**
+ * 前端星图页拉整张图：所有实体 + 桥。
+ * 过滤：泽和麦穗本人不进星系（他们是核心双星，单独画），
+ * 即便之前 haiku 错把他们当成 entity 入了库，这里挡住不显示。
+ */
 export function getGraph(): { entities: GraphEntity[]; links: GraphLink[] } {
   const db = getDb();
   const entities = db.prepare(
     `SELECT e.id, e.name, e.kind, e.updated_at AS updatedAt,
             (SELECT COUNT(*) FROM fragments f WHERE f.entity_id = e.id) AS fragmentCount
      FROM entities e
+     WHERE e.name NOT IN ('泽', '麦穗')
      ORDER BY e.updated_at DESC`,
   ).all() as GraphEntity[];
-  const links = db.prepare("SELECT a, b, weight FROM links").all() as GraphLink[];
+  // 桥线：两端都得是没被过滤掉的实体
+  const links = db.prepare(
+    `SELECT l.a, l.b, l.weight FROM links l
+     JOIN entities ea ON ea.id = l.a
+     JOIN entities eb ON eb.id = l.b
+     WHERE ea.name NOT IN ('泽', '麦穗') AND eb.name NOT IN ('泽', '麦穗')`,
+  ).all() as GraphLink[];
   return { entities, links };
 }
 
