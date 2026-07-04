@@ -442,31 +442,80 @@ async function doDelete(sess) {
   loadSessions();
 }
 
+// 一条消息的渲染逻辑，openSession 和"查看更早"复用同一份
+function renderMessage(m) {
+  if (m.tools?.length) {
+    const tb = newToolbox();
+    for (const tool of m.tools) tb.add(tool);
+  }
+  if (m.text || m.attachments?.length) {
+    if (m.role === "user") {
+      if (m.text === "（拍了拍你）" && !m.attachments?.length) {
+        patNote();
+      } else {
+        const bubble = addBubble("me", m.text || "");
+        for (const att of m.attachments || []) attachToBubble(bubble, att, true);
+      }
+    } else {
+      const bubble = addBubble("ta", "");
+      renderMd(bubble, m.text);
+      bubble.dataset.raw = m.text;
+    }
+  }
+}
+
+// 分段渲染：会话超长时先只上最近 50 条 DOM，其他留在内存里等按钮拉
+const CHAT_CHUNK = 50;
+let pendingOlderMessages = null;
+
+function addLoadOlderButton() {
+  const existing = document.getElementById("loadOlderBtn");
+  if (existing) existing.remove();
+  const btn = document.createElement("button");
+  btn.id = "loadOlderBtn";
+  btn.className = "load-older";
+  const n = Math.min(CHAT_CHUNK, pendingOlderMessages?.length || 0);
+  btn.textContent = `查看更早的 ${n} 条`;
+  btn.onclick = loadOlder;
+  // 放到消息区最上面
+  messagesEl.insertBefore(btn, messagesEl.firstChild);
+}
+
+function loadOlder() {
+  if (!pendingOlderMessages?.length) return;
+  const before = messagesEl.scrollHeight;
+  const chunk = pendingOlderMessages.slice(-CHAT_CHUNK);
+  pendingOlderMessages = pendingOlderMessages.slice(0, -CHAT_CHUNK);
+
+  // 保住现有 DOM，清空后按"更早 → 现有"顺序重排；比 insertBefore 一条条插省心
+  const saved = Array.from(messagesEl.children).filter((n) => n.id !== "loadOlderBtn");
+  messagesEl.innerHTML = "";
+  // 还有更早的 → 顶部继续放按钮
+  if (pendingOlderMessages.length > 0) addLoadOlderButton();
+  for (const m of chunk) renderMessage(m);
+  for (const node of saved) messagesEl.appendChild(node);
+
+  // 视野不跳：把 scrollTop 加上新增内容的高度差
+  const after = messagesEl.scrollHeight;
+  messagesEl.scrollTop += (after - before);
+}
+
 async function openSession(id) {
   const record = await api(`/api/sessions/${id}`);
   sessionId = record.id;
   localStorage.setItem("home_session", sessionId);
   messagesEl.innerHTML = "";
-  for (const m of record.messages) {
-    if (m.tools?.length) {
-      const tb = newToolbox();
-      for (const tool of m.tools) tb.add(tool);
-    }
-    if (m.text || m.attachments?.length) {
-      if (m.role === "user") {
-        if (m.text === "（拍了拍你）" && !m.attachments?.length) {
-          patNote();
-        } else {
-          const bubble = addBubble("me", m.text || "");
-          for (const att of m.attachments || []) attachToBubble(bubble, att, true);
-        }
-      } else {
-        const bubble = addBubble("ta", "");
-        renderMd(bubble, m.text);
-        bubble.dataset.raw = m.text;
-      }
-    }
+  pendingOlderMessages = null;
+
+  const all = record.messages;
+  if (all.length > CHAT_CHUNK) {
+    pendingOlderMessages = all.slice(0, -CHAT_CHUNK);
+    addLoadOlderButton();
+    for (const m of all.slice(-CHAT_CHUNK)) renderMessage(m);
+  } else {
+    for (const m of all) renderMessage(m);
   }
+
   forceScrollDown();
   closeDrawer();
   loadSessions();
@@ -476,6 +525,7 @@ $("newChat").onclick = () => {
   sessionId = null;
   localStorage.removeItem("home_session");
   messagesEl.innerHTML = "";
+  pendingOlderMessages = null;
   closeDrawer();
 };
 

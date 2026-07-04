@@ -105,6 +105,25 @@ header button#backHome { font-size: 18px; }
   border-radius: 8px; padding: 6px 10px; margin-bottom: 6px;
 }
 
+/* —— "查看更早的 50 条"按钮 —— */
+.load-older {
+  align-self: center;
+  border: 1px solid var(--line);
+  background: var(--panel);
+  color: var(--muted);
+  font-size: 12px;
+  padding: 6px 16px;
+  border-radius: 999px;
+  cursor: pointer;
+  font-family: inherit;
+  margin: 8px 0 4px;
+  touch-action: manipulation;
+}
+.load-older:hover, .load-older:active {
+  color: var(--accent);
+  border-color: var(--accent-soft);
+}
+
 /* —— 工具折叠盒 —— */
 .toolbox { align-self: flex-start; max-width: 84%; }
 .toolbox-head {
