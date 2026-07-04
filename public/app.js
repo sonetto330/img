@@ -550,6 +550,8 @@ function showView(name) {
   for (const btn of bottomNavEl.querySelectorAll(".nav-btn")) {
     btn.classList.toggle("active", btn.dataset.view === name);
   }
+  // 回首页时看看要不要刷招呼语（内部有 30 分钟节流）
+  if (name === "home") updateGreeting();
 }
 
 for (const btn of bottomNavEl.querySelectorAll(".nav-btn")) {
@@ -617,11 +619,27 @@ async function updateWeather() {
   }
 }
 
+// 麦穗生成的招呼语；启动和回首页时刷，本地也 throttle 一下别频繁调
+let lastGreetingFetchAt = 0;
+async function updateGreeting(force = false) {
+  if (!force && Date.now() - lastGreetingFetchAt < 30 * 60_000) return;
+  try {
+    const g = await api("/api/greeting");
+    if (g && typeof g.text === "string" && g.text) {
+      greetingEl.textContent = g.text;
+      lastGreetingFetchAt = Date.now();
+    }
+  } catch {
+    // 拿不到就保留 updateClock 写的时段静态问候
+  }
+}
+
 // —— 启动 ——
 showView("home");
 updateClock();
 updateDaysTogether();
 updateWeather();
+updateGreeting(true);  // 启动强制刷一次，别沿用静态文案
 // 每分钟刷一次时钟；跨天时"在一起 X 天"也顺手刷一下
 setInterval(() => {
   updateClock();

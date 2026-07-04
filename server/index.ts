@@ -13,6 +13,8 @@ import { barkPush } from "./bark.js";
 import { synthesize, ttsEnabled } from "./tts.js";
 import { getWeather } from "./weather.js";
 import { scheduleExtractionIfNeeded } from "./memory/scribe.js";
+import { loadPersona } from "./persona.js";
+import { getGreeting } from "./greeting.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const root = path.join(here, "..");
@@ -37,19 +39,6 @@ const IMAGE_EXT = new Set([".png", ".jpg", ".jpeg", ".gif", ".webp"]);
 
 const store = new SessionStore(DATA_DIR);
 const publicDir = path.join(root, "public");
-
-// 人设：优先用工作目录里的 CLAUDE.md，没有就用项目根目录那份。
-// 每轮都重新读，改了人设不用重启服务。
-function loadPersona(): string | undefined {
-  for (const p of [path.join(WORKSPACE, "CLAUDE.md"), path.join(root, "CLAUDE.md")]) {
-    try {
-      return fs.readFileSync(p, "utf8");
-    } catch {
-      /* 试下一个 */
-    }
-  }
-  return undefined;
-}
 
 const MIME: Record<string, string> = {
   ".html": "text/html; charset=utf-8",
@@ -143,6 +132,15 @@ const server = http.createServer((req, res) => {
       }
     });
     return;
+  }
+
+  // 首页招呼语：麦穗写给泽的一句话，30 分钟缓存
+  if (url.pathname === "/api/greeting") {
+    if (!authed(url)) return sendJson(res, 401, { error: "口令不对" });
+    return getGreeting().then(
+      (text) => sendJson(res, 200, { text }),
+      () => sendJson(res, 200, { text: "" }),
+    );
   }
 
   // 首页天气：走服务端代理，Open-Meteo 免 key，缓存 15 分钟
