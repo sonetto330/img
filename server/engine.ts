@@ -26,6 +26,8 @@ export interface TurnOptions {
   persona?: string;
   /** 当前会话模式的附加提示词，接在人设之后；不填就没这一层 */
   modePrompt?: string;
+  /** 从记忆库检索出来的相关碎片块，接在模式提示词之后；不填就没这一层 */
+  memoryBlock?: string;
   /** 当前模式挂载的 SDK MCP 工具 */
   mcpServers?: Options["mcpServers"];
   /** 允许模型调用的工具白名单（不传就用 SDK 默认全放开） */
@@ -37,13 +39,16 @@ export interface TurnOptions {
 }
 
 export function runTurn(opts: TurnOptions, cb: TurnCallbacks): TurnHandle {
-  // 组装系统提示 append 层：人设在前、模式补充在后，都缺就传 undefined
+  // 组装系统提示 append 层：人设 → 模式提示词 → 记忆碎片，缺哪层就跳哪层
   const appendParts: string[] = [];
   if (opts.persona) {
     appendParts.push(`以下是你的身份设定，任何时候都遵守：\n\n${opts.persona}`);
   }
   if (opts.modePrompt) {
     appendParts.push(`当前对话模式的补充要求：\n\n${opts.modePrompt}`);
+  }
+  if (opts.memoryBlock) {
+    appendParts.push(opts.memoryBlock);
   }
   const append = appendParts.length ? "\n" + appendParts.join("\n\n") : undefined;
 

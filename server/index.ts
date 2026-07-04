@@ -13,6 +13,8 @@ import { barkPush } from "./bark.js";
 import { synthesize, ttsEnabled } from "./tts.js";
 import { getWeather } from "./weather.js";
 import { scheduleExtractionIfNeeded } from "./memory/scribe.js";
+import { retrieve, markRetrieved } from "./memory/librarian.js";
+import { formatMemoryBlock } from "./memory/format.js";
 import { loadPersona } from "./persona.js";
 import { getGreeting } from "./greeting.js";
 
@@ -327,45 +329,66 @@ wss.on("connection", (ws: WebSocket, req) => {
     const emit = (event: ToolEvent) => send({ type: "custom", event });
     const built = getMode(record.mode).buildTools?.(emit);
 
-    active = runTurn(
-      {
-        prompt,
-        resume: record.claudeSessionId,
-        cwd: WORKSPACE,
-        permissionMode: PERMISSION_MODE,
-        persona: loadPersona(),
-        modePrompt: loadModePrompt(record.mode),
-        mcpServers: built?.mcpServers,
-        allowedTools: built?.allowedTools,
-      },
-      {
-        onClaudeSession(claudeSessionId) {
-          // Claude Code 每次 resume 会派生新的内部会话 id，得跟着更新
-          record.claudeSessionId = claudeSessionId;
-          store.save(record);
+    // 检索记忆：全模式生效。await 期间用一个占位 handle 锁住 active，防止连发消息触发并发
+    const preparing: TurnHandle = { interrupt: async () => {} };
+    active = preparing;
+    (async () => {
+      let memoryBlock: string | undefined;
+      let memoryIds: number[] = [];
+      try {
+        const memories = text ? await retrieve(text) : [];
+        if (memories.length) {
+          memoryBlock = formatMemoryBlock(memories, record.mode);
+          memoryIds = memories.map((m) => m.id);
+        }
+      } catch (err) {
+        console.error(`[librarian] ${err instanceof Error ? err.message : err}`);
+      }
+      if (active !== preparing) return; // 中途被 close/interrupt 换掉了，别继续
+
+      active = runTurn(
+        {
+          prompt,
+          resume: record.claudeSessionId,
+          cwd: WORKSPACE,
+          permissionMode: PERMISSION_MODE,
+          persona: loadPersona(),
+          modePrompt: loadModePrompt(record.mode),
+          memoryBlock,
+          mcpServers: built?.mcpServers,
+          allowedTools: built?.allowedTools,
         },
-        onDelta(text) {
-          send({ type: "delta", text });
+        {
+          onClaudeSession(claudeSessionId) {
+            // Claude Code 每次 resume 会派生新的内部会话 id，得跟着更新
+            record.claudeSessionId = claudeSessionId;
+            store.save(record);
+          },
+          onDelta(text) {
+            send({ type: "delta", text });
+          },
+          onTool(tool) {
+            send({ type: "tool", name: tool.name, detail: tool.detail });
+          },
+          onDone(finalText, tools) {
+            active = null;
+            record.messages.push({ role: "assistant", text: finalText, tools, at: new Date().toISOString() });
+            store.save(record);
+            send({ type: "done", text: finalText });
+            if (!anyoneWatching()) barkPush("麦穗", finalText).catch(() => {});
+            // 后台异步提取记忆碎片；不 await、出错不影响主聊天
+            scheduleExtractionIfNeeded(record);
+          },
+          onError(message) {
+            active = null;
+            send({ type: "error", message });
+            if (!anyoneWatching()) barkPush("麦穗（出错）", message).catch(() => {});
+          },
         },
-        onTool(tool) {
-          send({ type: "tool", name: tool.name, detail: tool.detail });
-        },
-        onDone(finalText, tools) {
-          active = null;
-          record.messages.push({ role: "assistant", text: finalText, tools, at: new Date().toISOString() });
-          store.save(record);
-          send({ type: "done", text: finalText });
-          if (!anyoneWatching()) barkPush("麦穗", finalText).catch(() => {});
-          // 后台异步提取记忆碎片；不 await、出错不影响主聊天
-          scheduleExtractionIfNeeded(record);
-        },
-        onError(message) {
-          active = null;
-          send({ type: "error", message });
-          if (!anyoneWatching()) barkPush("麦穗（出错）", message).catch(() => {});
-        },
-      },
-    );
+      );
+      // runTurn 已经启动，注入成功——把 read_count 打一记；即便本轮失败，"翻过牌"这件事也算数
+      if (memoryIds.length) markRetrieved(memoryIds);
+    })();
   });
 
   ws.on("close", () => {
