@@ -22,6 +22,8 @@ export interface StoredMessage {
 export interface SessionRecord {
   id: string;
   title: string;
+  /** 会话所属模式；旧数据无此字段按 chat 处理，会话建成后不改 */
+  mode: string;
   claudeSessionId?: string;
   createdAt: string;
   updatedAt: string;
@@ -42,11 +44,12 @@ export class SessionStore {
     return path.join(this.dir, `${id}.json`);
   }
 
-  create(): SessionRecord {
+  create(mode: string = "chat"): SessionRecord {
     const now = new Date().toISOString();
     const record: SessionRecord = {
       id: randomUUID(),
       title: "新会话",
+      mode,
       createdAt: now,
       updatedAt: now,
       messages: [],
@@ -57,7 +60,10 @@ export class SessionStore {
 
   get(id: string): SessionRecord | null {
     try {
-      return JSON.parse(fs.readFileSync(this.file(id), "utf8")) as SessionRecord;
+      const record = JSON.parse(fs.readFileSync(this.file(id), "utf8")) as SessionRecord;
+      // 旧数据可能没 mode，按 chat 处理，别在别处每次判空
+      if (!record.mode) record.mode = "chat";
+      return record;
     } catch {
       return null;
     }
@@ -85,12 +91,12 @@ export class SessionStore {
     return record;
   }
 
-  list(): Array<Pick<SessionRecord, "id" | "title" | "updatedAt">> {
-    const out: Array<Pick<SessionRecord, "id" | "title" | "updatedAt">> = [];
+  list(): Array<Pick<SessionRecord, "id" | "title" | "mode" | "updatedAt">> {
+    const out: Array<Pick<SessionRecord, "id" | "title" | "mode" | "updatedAt">> = [];
     for (const name of fs.readdirSync(this.dir)) {
       if (!name.endsWith(".json")) continue;
       const record = this.get(name.slice(0, -5));
-      if (record) out.push({ id: record.id, title: record.title, updatedAt: record.updatedAt });
+      if (record) out.push({ id: record.id, title: record.title, mode: record.mode, updatedAt: record.updatedAt });
     }
     out.sort((a, b) => (a.updatedAt < b.updatedAt ? 1 : -1));
     return out;

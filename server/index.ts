@@ -223,7 +223,7 @@ wss.on("connection", (ws: WebSocket, req) => {
   };
 
   ws.on("message", (raw) => {
-    let msg: { type?: string; sessionId?: string; text?: string; attachments?: Attachment[] };
+    let msg: { type?: string; sessionId?: string; text?: string; mode?: string; attachments?: Attachment[] };
     try {
       msg = JSON.parse(String(raw));
     } catch {
@@ -237,11 +237,12 @@ wss.on("connection", (ws: WebSocket, req) => {
 
     if (msg.type === "pat") {
       if (active) return send({ type: "error", message: "上一条还在跑，等等或者先打断" });
+      // 拍一拍如果没在已有会话里就新建一个，走默认 chat 模式
       const record = (msg.sessionId && store.get(msg.sessionId)) || store.create();
       // 拍一拍不改标题；存历史用固定文本，前端识别后显示成居中小字
       record.messages.push({ role: "user", text: "（拍了拍你）", at: new Date().toISOString() });
       store.save(record);
-      send({ type: "session", sessionId: record.id, title: record.title });
+      send({ type: "session", sessionId: record.id, title: record.title, mode: record.mode });
 
       active = runTurn(
         {
@@ -295,13 +296,14 @@ wss.on("connection", (ws: WebSocket, req) => {
     if (msg.type !== "chat" || (!text && attachments.length === 0)) return;
     if (active) return send({ type: "error", message: "上一条还在跑，等等或者先打断" });
 
-    const record = (msg.sessionId && store.get(msg.sessionId)) || store.create();
+    // 已有会话不改 mode；只有新建时才认 msg.mode，未指定就默认 chat
+    const record = (msg.sessionId && store.get(msg.sessionId)) || store.create(msg.mode || "chat");
     if (record.messages.length === 0) {
       record.title = (text || attachments[0]?.name || "新会话").slice(0, 24);
     }
     record.messages.push({ role: "user", text, attachments, at: new Date().toISOString() });
     store.save(record);
-    send({ type: "session", sessionId: record.id, title: record.title });
+    send({ type: "session", sessionId: record.id, title: record.title, mode: record.mode });
 
     // 附件以文件路径的形式告诉他，图片他会用 Read 工具看
     const attLines = attachments
