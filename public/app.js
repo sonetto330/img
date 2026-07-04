@@ -386,19 +386,30 @@ async function api(pathname) {
   return res.json();
 }
 
+// 判断"技术会话"：工具消息占比 ≥30%（真拿麦穗改代码/查东西的那种）
+// 单纯问一句"你什么模型"引发的少量工具使用不算，占比阈值把它归聊天
+function isTechnicalSession(s) {
+  const tools = s.toolMessageCount || 0;
+  const total = s.messageCount || 0;
+  if (total < 4) return false;                // 太短没法判断，保守当聊天
+  return tools / total >= 0.3;
+}
+
 async function loadSessions() {
   const sessions = await api("/api/sessions");
-  // 顺手把首页的消息总数刷了；0 条时换文案，别把冷冰冰的"0"挂在墙上
-  const total = sessions.reduce((n, s) => n + (s.messageCount || 0), 0);
+  // 首页消息总数**只算聊天会话**，技术会话（我改代码那种）不计
+  const chatTotal = sessions
+    .filter((s) => !isTechnicalSession(s))
+    .reduce((n, s) => n + (s.messageCount || 0), 0);
   const row = $("msgCountRow");
   if (row) {
-    if (total === 0) {
+    if (chatTotal === 0) {
       row.classList.add("empty");
       $("msgCountUnit").textContent = "还没聊过";
     } else {
       row.classList.remove("empty");
-      msgCountEl.textContent = total;
-      $("msgCountUnit").textContent = "条消息 · 全部会话";
+      msgCountEl.textContent = chatTotal;
+      $("msgCountUnit").textContent = "条消息 · 全部聊天";
     }
   }
   listEl.innerHTML = "";
@@ -409,6 +420,12 @@ async function loadSessions() {
     const title = document.createElement("div");
     title.className = "sess-title";
     title.textContent = s.title;
+    if (isTechnicalSession(s)) {
+      const tag = document.createElement("span");
+      tag.className = "sess-tag";
+      tag.textContent = "技术";
+      title.appendChild(tag);
+    }
     const t = document.createElement("time");
     t.textContent = new Date(s.updatedAt).toLocaleString("zh-CN");
     info.append(title, t);

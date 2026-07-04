@@ -91,17 +91,24 @@ export class SessionStore {
     return record;
   }
 
-  list(): Array<Pick<SessionRecord, "id" | "title" | "mode" | "updatedAt"> & { messageCount: number }> {
-    const out: Array<Pick<SessionRecord, "id" | "title" | "mode" | "updatedAt"> & { messageCount: number }> = [];
+  list(): Array<Pick<SessionRecord, "id" | "title" | "mode" | "updatedAt"> & { messageCount: number; toolMessageCount: number }> {
+    const out: Array<Pick<SessionRecord, "id" | "title" | "mode" | "updatedAt"> & { messageCount: number; toolMessageCount: number }> = [];
     for (const name of fs.readdirSync(this.dir)) {
       if (!name.endsWith(".json")) continue;
       const record = this.get(name.slice(0, -5));
-      if (record) out.push({
+      if (!record) continue;
+      // 技术会话判定用：assistant 消息里有 tools 的条数
+      let toolMessageCount = 0;
+      for (const m of record.messages) {
+        if (m.role === "assistant" && Array.isArray(m.tools) && m.tools.length > 0) toolMessageCount++;
+      }
+      out.push({
         id: record.id,
         title: record.title,
         mode: record.mode,
         updatedAt: record.updatedAt,
         messageCount: record.messages.length,
+        toolMessageCount,
       });
     }
     out.sort((a, b) => (a.updatedAt < b.updatedAt ? 1 : -1));
