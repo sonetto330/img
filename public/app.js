@@ -531,18 +531,17 @@ $("backHome").onclick = () => showView("home");
 $("memoryBack").onclick = () => showView("home");
 
 // —— 记忆星图 ——
-// I.1 只做数据加载和空态；I.2 加 canvas 渲染，I.3 加手势和详情
-let memoryGraph = null;
+// 星图渲染在 starmap.js 里（另一个 <script> 标签），通过 window 共享数据
 async function loadMemoryGraph() {
   try {
-    memoryGraph = await api("/api/memory/graph");
-    const n = memoryGraph.entities?.length || 0;
+    const graph = await api("/api/memory/graph");
+    window.memoryGraph = graph;
+    const n = graph.entities?.length || 0;
     $("memoryMeta").textContent = n
-      ? `${n} 个星座 · ${memoryGraph.links.length} 条桥`
+      ? `${n} 个星座 · ${graph.links.length} 条桥`
       : "";
     $("memoryEmpty").hidden = n > 0;
-    // I.2 会在这里调渲染
-    if (typeof renderStarmap === "function") renderStarmap();
+    if (typeof window.renderStarmap === "function") window.renderStarmap();
   } catch {
     $("memoryEmpty").hidden = false;
     $("memoryMeta").textContent = "";
