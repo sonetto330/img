@@ -30,6 +30,13 @@ export function getDb(): Database.Database {
  * 表结构参考 fable 的四期规划 03-memory-constellation：碎片 → 实体 → 情节，
  * 加实体间连接（links）和中文 trigram 全文索引。
  */
+/** 加列：老库没这一列就 ALTER TABLE 补上；有就跳过（PRAGMA 查列名） */
+function ensureColumn(db: Database.Database, table: string, column: string, def: string): void {
+  const rows = db.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>;
+  if (rows.some((r) => r.name === column)) return;
+  db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${def}`);
+}
+
 function ensureSchema(db: Database.Database): void {
   db.exec(`
     -- 单条事实碎片，第三人称短句
@@ -39,6 +46,7 @@ function ensureSchema(db: Database.Database): void {
       session_id TEXT,
       entity_id INTEGER REFERENCES entities(id) ON DELETE SET NULL,
       status TEXT NOT NULL DEFAULT 'active',  -- active | consolidated
+      read_count INTEGER NOT NULL DEFAULT 0,  -- 每次被注入 +1，用来做热度抑制
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
     CREATE INDEX IF NOT EXISTS fragments_entity_idx ON fragments(entity_id);
@@ -109,4 +117,7 @@ function ensureSchema(db: Database.Database): void {
       INSERT INTO episodes_fts(rowid, text) VALUES (new.id, new.text);
     END;
   `);
+
+  // 迁移：老库如果没 read_count 列（D.1 版本创建的）补上
+  ensureColumn(db, "fragments", "read_count", "INTEGER NOT NULL DEFAULT 0");
 }
