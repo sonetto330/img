@@ -24,6 +24,8 @@ export interface TurnOptions {
   permissionMode: Options["permissionMode"];
   /** 人设内容（CLAUDE.md 全文），每一轮都直接注入系统提示，保证生效 */
   persona?: string;
+  /** 当前会话模式的附加提示词，接在人设之后；不填就没这一层 */
+  modePrompt?: string;
   /** 模型别名或 id，比如 "haiku"；不填走默认 */
   model?: string;
   /** 单轮里最多几步；拍一拍这类"不动工具"的场景传 1 */
@@ -31,6 +33,16 @@ export interface TurnOptions {
 }
 
 export function runTurn(opts: TurnOptions, cb: TurnCallbacks): TurnHandle {
+  // 组装系统提示 append 层：人设在前、模式补充在后，都缺就传 undefined
+  const appendParts: string[] = [];
+  if (opts.persona) {
+    appendParts.push(`以下是你的身份设定，任何时候都遵守：\n\n${opts.persona}`);
+  }
+  if (opts.modePrompt) {
+    appendParts.push(`当前对话模式的补充要求：\n\n${opts.modePrompt}`);
+  }
+  const append = appendParts.length ? "\n" + appendParts.join("\n\n") : undefined;
+
   const q = query({
     prompt: opts.prompt,
     options: {
@@ -43,7 +55,7 @@ export function runTurn(opts: TurnOptions, cb: TurnCallbacks): TurnHandle {
       systemPrompt: {
         type: "preset",
         preset: "claude_code",
-        append: opts.persona ? `\n以下是你的身份设定，任何时候都遵守：\n\n${opts.persona}` : undefined,
+        append,
       },
       // 引擎报错时把详细原因打到服务端控制台，方便排查
       stderr: (data) => console.error(`[engine] ${data}`),

@@ -8,6 +8,7 @@ import type { Options } from "@anthropic-ai/claude-agent-sdk";
 import { randomUUID } from "node:crypto";
 import { SessionStore, type Attachment } from "./sessions.js";
 import { runTurn, type TurnHandle } from "./engine.js";
+import { loadModePrompt } from "./modes.js";
 import { barkPush } from "./bark.js";
 import { synthesize, ttsEnabled } from "./tts.js";
 
@@ -251,6 +252,7 @@ wss.on("connection", (ws: WebSocket, req) => {
           cwd: WORKSPACE,
           permissionMode: PERMISSION_MODE,
           persona: loadPersona(),
+          modePrompt: loadModePrompt(record.mode),
           model: process.env.CLAUDE_MODEL || "claude-opus-4-7",
           maxTurns: 1,
         },
@@ -318,6 +320,7 @@ wss.on("connection", (ws: WebSocket, req) => {
         cwd: WORKSPACE,
         permissionMode: PERMISSION_MODE,
         persona: loadPersona(),
+        modePrompt: loadModePrompt(record.mode),
       },
       {
         onClaudeSession(claudeSessionId) {
