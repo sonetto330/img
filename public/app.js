@@ -37,19 +37,19 @@ function handle(msg) {
       localStorage.setItem("home_session", sessionId);
       break;
     case "delta":
+      hideTyping();
       if (!liveBubble) liveBubble = addBubble("ta", "");
       liveBubble.textContent += msg.text;
       scrollDown();
       break;
     case "tool": {
+      hideTyping();
       if (!liveTools) {
         liveTools = document.createElement("div");
         liveTools.className = "tools";
         messagesEl.appendChild(liveTools);
       }
-      const chip = document.createElement("span");
-      chip.textContent = `🔧 ${msg.name}`;
-      liveTools.appendChild(chip);
+      addToolChip(liveTools, msg);
       scrollDown();
       break;
     }
@@ -75,10 +75,47 @@ function finishTurn() {
   busy = false;
   liveBubble = null;
   liveTools = null;
+  hideTyping();
   statusEl.classList.remove("busy");
   sendBtn.hidden = false;
   stopBtn.hidden = true;
   scrollDown();
+}
+
+// —— 工具标签（点一下展开看他具体干了啥） ——
+function addToolChip(container, tool) {
+  const name = typeof tool === "string" ? tool : tool.name;
+  const detail = typeof tool === "string" ? undefined : tool.detail;
+  const chip = document.createElement("span");
+  chip.className = "chip";
+  chip.textContent = `🔧 ${name}`;
+  if (detail) {
+    chip.classList.add("has-detail");
+    const pre = document.createElement("pre");
+    pre.className = "tool-detail";
+    pre.textContent = detail;
+    pre.hidden = true;
+    chip.onclick = () => { pre.hidden = !pre.hidden; scrollDown(); };
+    container.appendChild(chip);
+    container.appendChild(pre);
+    return;
+  }
+  container.appendChild(chip);
+}
+
+// —— “正在忙”指示 ——
+let typingEl = null;
+function showTyping() {
+  if (typingEl) return;
+  typingEl = document.createElement("div");
+  typingEl.className = "typing";
+  typingEl.innerHTML = "<span></span><span></span><span></span>";
+  messagesEl.appendChild(typingEl);
+  scrollDown();
+}
+function hideTyping() {
+  typingEl?.remove();
+  typingEl = null;
 }
 
 // —— 界面 ——
@@ -116,6 +153,7 @@ function sendMessage() {
   statusEl.classList.add("busy");
   sendBtn.hidden = true;
   stopBtn.hidden = false;
+  showTyping();
   ws.send(JSON.stringify({ type: "chat", sessionId, text }));
 }
 
@@ -169,11 +207,7 @@ async function openSession(id) {
     if (m.tools?.length) {
       const tools = document.createElement("div");
       tools.className = "tools";
-      for (const name of m.tools) {
-        const chip = document.createElement("span");
-        chip.textContent = `🔧 ${name}`;
-        tools.appendChild(chip);
-      }
+      for (const tool of m.tools) addToolChip(tools, tool);
       messagesEl.appendChild(tools);
     }
     if (m.text) {

@@ -144,8 +144,8 @@ wss.on("connection", (ws: WebSocket, req) => {
         onDelta(text) {
           send({ type: "delta", text });
         },
-        onTool(name) {
-          send({ type: "tool", name });
+        onTool(tool) {
+          send({ type: "tool", name: tool.name, detail: tool.detail });
         },
         onDone(finalText, tools) {
           active = null;

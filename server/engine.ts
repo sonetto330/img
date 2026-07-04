@@ -1,10 +1,15 @@
 import { query, type Options } from "@anthropic-ai/claude-agent-sdk";
 
+export interface ToolCall {
+  name: string;
+  detail?: string;
+}
+
 export interface TurnCallbacks {
   onClaudeSession(claudeSessionId: string): void;
   onDelta(text: string): void;
-  onTool(name: string): void;
-  onDone(finalText: string, tools: string[]): void;
+  onTool(tool: ToolCall): void;
+  onDone(finalText: string, tools: ToolCall[]): void;
   onError(message: string): void;
 }
 
@@ -40,7 +45,7 @@ export function runTurn(opts: TurnOptions, cb: TurnCallbacks): TurnHandle {
   });
 
   const textParts: string[] = [];
-  const tools: string[] = [];
+  const tools: ToolCall[] = [];
 
   (async () => {
     try {
@@ -53,8 +58,6 @@ export function runTurn(opts: TurnOptions, cb: TurnCallbacks): TurnHandle {
             const e = msg.event;
             if (e.type === "content_block_delta" && e.delta.type === "text_delta") {
               cb.onDelta(e.delta.text);
-            } else if (e.type === "content_block_start" && e.content_block.type === "tool_use") {
-              cb.onTool(e.content_block.name);
             }
             break;
           }
@@ -63,7 +66,9 @@ export function runTurn(opts: TurnOptions, cb: TurnCallbacks): TurnHandle {
               if (block.type === "text" && block.text.trim()) {
                 textParts.push(block.text);
               } else if (block.type === "tool_use") {
-                tools.push(block.name);
+                const tool = { name: block.name, detail: summarizeInput(block.name, block.input) };
+                tools.push(tool);
+                cb.onTool(tool);
               }
             }
             break;
@@ -84,4 +89,20 @@ export function runTurn(opts: TurnOptions, cb: TurnCallbacks): TurnHandle {
   return {
     interrupt: () => q.interrupt(),
   };
+}
+
+/** 把工具输入压缩成一行人话摘要，给前端展开看 */
+function summarizeInput(name: string, input: unknown): string | undefined {
+  if (!input || typeof input !== "object") return undefined;
+  const obj = input as Record<string, unknown>;
+  const pick = (...keys: string[]) => {
+    for (const k of keys) {
+      if (typeof obj[k] === "string" && (obj[k] as string).trim()) return obj[k] as string;
+    }
+    return undefined;
+  };
+  const raw =
+    pick("command", "file_path", "pattern", "query", "url", "prompt", "description") ??
+    JSON.stringify(obj);
+  return raw.length > 300 ? raw.slice(0, 300) + "…" : raw;
 }

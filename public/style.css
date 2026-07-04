@@ -60,11 +60,27 @@ header button {
 .msg.md th, .msg.md td { border: 1px solid var(--line); padding: 4px 8px; }
 .msg.md a { color: var(--accent); }
 
-.tools { align-self: flex-start; display: flex; flex-wrap: wrap; gap: 6px; }
-.tools span {
+.tools { align-self: flex-start; display: flex; flex-wrap: wrap; gap: 6px; max-width: 86%; }
+.tools .chip {
   font-size: 12px; color: var(--muted); background: var(--panel);
   border: 1px dashed var(--line); border-radius: 999px; padding: 2px 10px;
 }
+.tools .chip.has-detail { cursor: pointer; }
+.tools .chip.has-detail::after { content: " ›"; color: var(--accent); }
+.tools .tool-detail {
+  flex-basis: 100%; margin: 0; font-size: 12px; color: var(--muted);
+  background: var(--panel); border: 1px dashed var(--line); border-radius: 8px;
+  padding: 6px 10px; white-space: pre-wrap; word-break: break-all;
+}
+
+.typing { align-self: flex-start; display: flex; gap: 4px; padding: 12px 14px; }
+.typing span {
+  width: 7px; height: 7px; border-radius: 50%; background: var(--accent);
+  opacity: .35; animation: blink 1.2s infinite;
+}
+.typing span:nth-child(2) { animation-delay: .2s; }
+.typing span:nth-child(3) { animation-delay: .4s; }
+@keyframes blink { 0%, 60%, 100% { opacity: .25; } 30% { opacity: .9; } }
 
 footer {
   display: flex; gap: 8px; align-items: flex-end;

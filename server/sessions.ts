@@ -5,7 +5,8 @@ import { randomUUID } from "node:crypto";
 export interface StoredMessage {
   role: "user" | "assistant";
   text: string;
-  tools?: string[];
+  /** 早期记录是字符串数组，后来带 detail，两种都要能读 */
+  tools?: Array<string | { name: string; detail?: string }>;
   at: string;
 }
 
