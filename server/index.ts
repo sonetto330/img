@@ -12,6 +12,7 @@ import { getMode, loadModePrompt, type ToolEvent } from "./modes.js";
 import { barkPush } from "./bark.js";
 import { synthesize, ttsEnabled } from "./tts.js";
 import { getWeather } from "./weather.js";
+import { scheduleExtractionIfNeeded } from "./memory/scribe.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const root = path.join(here, "..");
@@ -357,6 +358,8 @@ wss.on("connection", (ws: WebSocket, req) => {
           store.save(record);
           send({ type: "done", text: finalText });
           if (!anyoneWatching()) barkPush("麦穗", finalText).catch(() => {});
+          // 后台异步提取记忆碎片；不 await、出错不影响主聊天
+          scheduleExtractionIfNeeded(record);
         },
         onError(message) {
           active = null;

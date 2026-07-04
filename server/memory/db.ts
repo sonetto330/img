@@ -72,6 +72,13 @@ function ensureSchema(db: Database.Database): void {
       CHECK (a < b)  -- 强制小 id 在前，避免同一对存两条
     );
 
+    -- 提取状态：每个会话上次跑到哪条消息、什么时候跑过
+    CREATE TABLE IF NOT EXISTS extraction_state (
+      session_id TEXT PRIMARY KEY,
+      last_message_index INTEGER NOT NULL DEFAULT 0,
+      last_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
     -- 中文必须用 trigram 分词器，默认 unicode61 不切中文词
     CREATE VIRTUAL TABLE IF NOT EXISTS fragments_fts USING fts5(
       text, content='fragments', content_rowid='id', tokenize='trigram'
