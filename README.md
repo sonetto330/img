@@ -66,6 +66,12 @@ http://192.168.x.x:3000
 copy CLAUDE.md workspace\CLAUDE.md
 ```
 
+## 可选功能
+
+**Bark 手机推送**：手机 App Store 搜 Bark，装完 App 里会给一串 key，填进 `.env` 的 `BARK_KEY`。页面没打开时麦穗回复完会推一条通知到手机，不填就整个关掉。
+
+**ElevenLabs 念出声**：气泡右下角的 🔊 按钮，用你在 ElevenLabs 后台选好的音色念麦穗的回复。`.env` 里填 `ELEVENLABS_KEY`（API key）和 `ELEVENLABS_VOICE`（voice id）。**按字符扣额度**——每点一次 🔊 都算钱，别拿超长回复反复点。正文超过 500 字会自动截断，代码块会被剥掉不念。
+
 ## 出门在外也想用？
 
 装 [Tailscale](https://tailscale.com)（免费）：电脑和手机各装一个，登录同一账号，手机用 Tailscale 分配的 IP 访问即可。流量走加密隧道回家，从家宽出口，不经过任何第三方服务器。

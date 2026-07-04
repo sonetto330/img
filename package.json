@@ -12,6 +12,7 @@
     "@anthropic-ai/claude-agent-sdk": "latest",
     "dotenv": "^16.4.5",
     "marked": "^18.0.5",
+    "undici": "^8.6.0",
     "ws": "^8.18.0"
   },
   "devDependencies": {

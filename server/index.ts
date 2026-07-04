@@ -9,6 +9,7 @@ import { randomUUID } from "node:crypto";
 import { SessionStore, type Attachment } from "./sessions.js";
 import { runTurn, type TurnHandle } from "./engine.js";
 import { barkPush } from "./bark.js";
+import { synthesize, ttsEnabled } from "./tts.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const root = path.join(here, "..");
@@ -109,6 +110,36 @@ const server = http.createServer((req, res) => {
       res.writeHead(200, { "Content-Type": MIME[path.extname(filePath).toLowerCase()] || "application/octet-stream" });
       res.end(data);
     });
+  }
+
+  // TTS：把文本转成音频流回来（需要口令）
+  if (url.pathname === "/api/tts" && req.method === "POST") {
+    if (!authed(url)) return sendJson(res, 401, { error: "口令不对" });
+    if (!ttsEnabled()) return sendJson(res, 503, { error: "TTS 没配置" });
+    const chunks: Buffer[] = [];
+    req.on("data", (c: Buffer) => chunks.push(c));
+    req.on("end", async () => {
+      let body: { text?: string };
+      try {
+        body = JSON.parse(Buffer.concat(chunks).toString("utf8") || "{}");
+      } catch {
+        return sendJson(res, 400, { error: "消息格式不对" });
+      }
+      const text = String(body.text || "").trim();
+      if (!text) return sendJson(res, 400, { error: "没有可念的内容" });
+      try {
+        const { audio, contentType } = await synthesize(text);
+        res.writeHead(200, {
+          "Content-Type": contentType,
+          "Cache-Control": "no-store",
+        });
+        res.end(Buffer.from(audio));
+      } catch (err) {
+        console.error(`[tts] ${err instanceof Error ? err.message : String(err)}`);
+        sendJson(res, 502, { error: err instanceof Error ? err.message : "TTS 失败" });
+      }
+    });
+    return;
   }
 
   // API：会话列表 / 会话内容（需要口令）

@@ -48,12 +48,21 @@ function handle(msg) {
       liveTools.add(msg);
       break;
     }
-    case "done":
-      if (liveBubble) renderMd(liveBubble, msg.text || liveBubble.textContent);
-      else if (msg.text) renderMd(addBubble("ta", ""), msg.text);
+    case "done": {
+      let bubble = liveBubble;
+      if (bubble) renderMd(bubble, msg.text || bubble.textContent);
+      else if (msg.text) {
+        bubble = addBubble("ta", "");
+        renderMd(bubble, msg.text);
+      }
+      if (bubble && msg.text) {
+        bubble.dataset.raw = msg.text;
+        attachTtsBtn(bubble);
+      }
       finishTurn();
       loadSessions();
       break;
+    }
     case "error":
       if (msg.message === "口令不对") {
         localStorage.removeItem("home_token");
@@ -271,6 +280,89 @@ function sendPat() {
   ws.send(JSON.stringify({ type: "pat", sessionId }));
 }
 document.querySelector(".avatar").addEventListener("dblclick", sendPat);
+
+// —— TTS：用麦穗的声音念气泡 ——
+let curTtsAudio = null;
+let curTtsBtn = null;
+
+function attachTtsBtn(bubble) {
+  if (bubble.querySelector(".tts-btn")) return;
+  const btn = document.createElement("button");
+  btn.type = "button";
+  btn.className = "tts-btn";
+  btn.setAttribute("aria-label", "念出来");
+  btn.textContent = "🔊";
+  btn.addEventListener("click", (e) => {
+    e.stopPropagation();
+    playTts(btn, bubble);
+  });
+  bubble.appendChild(btn);
+}
+
+function resetTtsBtn(btn) {
+  if (!btn) return;
+  btn.textContent = "🔊";
+  btn.disabled = false;
+}
+
+async function playTts(btn, bubble) {
+  // 再点当前正在播的：暂停并复位
+  if (curTtsBtn === btn && curTtsAudio) {
+    curTtsAudio.pause();
+    curTtsAudio.src = "";
+    curTtsAudio = null;
+    resetTtsBtn(curTtsBtn);
+    curTtsBtn = null;
+    return;
+  }
+  // 别的按钮：先停掉当前的
+  if (curTtsAudio) {
+    curTtsAudio.pause();
+    curTtsAudio.src = "";
+    curTtsAudio = null;
+    resetTtsBtn(curTtsBtn);
+    curTtsBtn = null;
+  }
+  const raw = (bubble.dataset.raw || "").trim();
+  if (!raw) return;
+  btn.disabled = true;
+  btn.textContent = "…";
+  try {
+    const res = await fetch(`/api/tts?token=${encodeURIComponent(token)}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text: raw }),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));
+      throw new Error(err.error || `HTTP ${res.status}`);
+    }
+    const blob = await res.blob();
+    const audioUrl = URL.createObjectURL(blob);
+    const audio = new Audio(audioUrl);
+    curTtsAudio = audio;
+    curTtsBtn = btn;
+    btn.disabled = false;
+    btn.textContent = "⏸";
+    const cleanup = () => {
+      URL.revokeObjectURL(audioUrl);
+      if (curTtsBtn === btn) {
+        resetTtsBtn(btn);
+        curTtsAudio = null;
+        curTtsBtn = null;
+      }
+    };
+    audio.onended = cleanup;
+    audio.onerror = () => {
+      cleanup();
+      addBubble("error", "TTS 播放失败");
+    };
+    await audio.play();
+  } catch (e) {
+    resetTtsBtn(btn);
+    addBubble("error", `TTS：${e.message}`);
+  }
+}
 inputEl.addEventListener("keydown", (e) => {
   if (e.key === "Enter" && !e.shiftKey && !e.isComposing) {
     e.preventDefault();
@@ -402,7 +494,10 @@ async function openSession(id) {
           for (const att of m.attachments || []) attachToBubble(bubble, att, true);
         }
       } else {
-        renderMd(addBubble("ta", ""), m.text);
+        const bubble = addBubble("ta", "");
+        renderMd(bubble, m.text);
+        bubble.dataset.raw = m.text;
+        attachTtsBtn(bubble);
       }
     }
   }
