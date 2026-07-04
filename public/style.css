@@ -366,6 +366,8 @@ footer textarea:focus { border-color: var(--accent-soft); }
   color: #d9d3c4; font-family: var(--serif);
   pointer-events: none;
 }
+.memory-empty[hidden] { display: none; }
+.memory-empty * { pointer-events: none; }
 .empty-title { font-size: 22px; margin-bottom: 12px; }
 .empty-sub { font-size: 13px; color: #8a8474; line-height: 1.7; }
 

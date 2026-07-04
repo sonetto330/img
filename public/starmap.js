@@ -34,19 +34,23 @@ function buildLayout(W, H, entities) {
   const cx = W / 2, cy = H / 2;
   const orbit = Math.min(W, H) * 0.33;
   const positions = new Map();
+  const galaxies = []; // 每个 kind 的星系中心，画方位标签用
   const groups = {};
   for (const e of entities) {
     (groups[e.kind] || (groups[e.kind] = [])).push(e);
   }
-  for (const kind of Object.keys(groups)) {
-    const meta = KIND_META[kind] || KIND_META.person;
-    const list = groups[kind].slice().sort(
-      (a, b) => (b.fragmentCount || 0) - (a.fragmentCount || 0),
-    );
+  // 无论有没有实体，五个 kind 的方位都占位（标签总画）
+  for (const kind of Object.keys(KIND_META)) {
+    const meta = KIND_META[kind];
     const ang = (meta.angleDeg * Math.PI) / 180;
-    // 横屏适度拉长，避免星系挤在中间
     const gx = cx + Math.cos(ang) * orbit * (W > H ? 1.25 : 0.9);
     const gy = cy + Math.sin(ang) * orbit;
+    galaxies.push({ kind, gx, gy, meta });
+
+    const list = (groups[kind] || []).slice().sort(
+      (a, b) => (b.fragmentCount || 0) - (a.fragmentCount || 0),
+    );
+    if (!list.length) continue;
     const nebulaR = Math.min(W, H) * 0.17 + Math.sqrt(list.length + 1) * 6;
     const r = seededRng(hashStr(kind));
     for (let i = 0; i < list.length; i++) {
@@ -63,7 +67,7 @@ function buildLayout(W, H, entities) {
       });
     }
   }
-  return { cx, cy, positions };
+  return { cx, cy, positions, galaxies };
 }
 
 // 背景星尘（静态，按尺寸缓存）
@@ -72,13 +76,15 @@ function backgroundStars(W, H) {
   if (_bgCache && _bgCache.W === W && _bgCache.H === H) return _bgCache.list;
   const list = [];
   const r = seededRng(42);
-  const n = Math.max(60, Math.floor((W * H) / 4500));
+  // 密度提上来，星尘更有分量；小尺寸的偏多，几颗亮的做点缀
+  const n = Math.max(120, Math.floor((W * H) / 2400));
   for (let i = 0; i < n; i++) {
+    const bright = r() > 0.94;
     list.push({
       x: r() * W,
       y: r() * H,
-      r: r() * 0.9 + 0.2,
-      alpha: r() * 0.55 + 0.15,
+      r: bright ? r() * 1.4 + 0.9 : r() * 0.75 + 0.15,
+      alpha: bright ? r() * 0.4 + 0.55 : r() * 0.45 + 0.12,
     });
   }
   _bgCache = { W, H, list };
@@ -129,6 +135,17 @@ function renderStarmap() {
   ctx.translate(camera.panX * dpr, camera.panY * dpr);
   ctx.scale(camera.scale, camera.scale);
 
+  // 方位标签（每个 kind 星系的题头，淡且宁静，不抢星点风头）
+  ctx.font = `${13 / camera.scale}px "Songti SC", "SimSun", serif`;
+  ctx.textAlign = "center";
+  ctx.fillStyle = "rgba(240, 231, 211, 0.28)";
+  for (const g of layout.galaxies) {
+    // 标签放在星系中心稍偏外一点，避免和圆点重叠
+    const outAng = (g.meta.angleDeg * Math.PI) / 180;
+    const outR = 24 / camera.scale;
+    ctx.fillText(g.meta.label, g.gx + Math.cos(outAng) * outR, g.gy + Math.sin(outAng) * outR);
+  }
+
   // 桥线
   ctx.strokeStyle = "rgba(200, 190, 160, 0.22)";
   for (const link of links) {
@@ -161,12 +178,17 @@ function renderStarmap() {
     ctx.fillText(p.entity.name, p.x, p.y + p.r + 14 / camera.scale);
   }
 
-  // 中间双星
-  drawCore(ctx, layout.cx - 9, layout.cy, "#f5cf7a", "泽");
-  drawCore(ctx, layout.cx + 9, layout.cy, "#e6a468", "麦穗");
+  // 中间双星：两颗紧挨的球 + 一条居中的合并标签
+  drawCoreOrb(ctx, layout.cx - 9, layout.cy, "#f5cf7a");
+  drawCoreOrb(ctx, layout.cx + 9, layout.cy, "#e6a468");
+  ctx.font = `${11 / camera.scale}px "Songti SC", "SimSun", serif`;
+  ctx.textAlign = "center";
+  ctx.fillStyle = "#f0e7d3";
+  ctx.fillText("泽 · 麦穗", layout.cx, layout.cy + 30 / camera.scale);
 }
 
-function drawCore(ctx, x, y, color, label) {
+// 只画球+光晕，不带 label（合并标签由 renderStarmap 统一居中画）
+function drawCoreOrb(ctx, x, y, color) {
   const glow = ctx.createRadialGradient(x, y, 0, x, y, 24);
   glow.addColorStop(0, color + "cc");
   glow.addColorStop(1, color + "00");
@@ -178,10 +200,6 @@ function drawCore(ctx, x, y, color, label) {
   ctx.beginPath();
   ctx.arc(x, y, 6, 0, Math.PI * 2);
   ctx.fill();
-  ctx.font = '11px "Songti SC", "SimSun", serif';
-  ctx.textAlign = "center";
-  ctx.fillStyle = "#f0e7d3";
-  ctx.fillText(label, x, y + 24);
 }
 
 // 尺寸变化重画（旋转手机、桌面窗口拖动）
