@@ -15,7 +15,7 @@ import { getWeather } from "./weather.js";
 import { scheduleExtractionIfNeeded } from "./memory/scribe.js";
 import { retrieve, markRetrieved } from "./memory/librarian.js";
 import { formatMemoryBlock } from "./memory/format.js";
-import { getGraph, getEntityDetail } from "./memory/graph.js";
+import { getGraph, getEntityDetail, getCoreDetail } from "./memory/graph.js";
 import { loadPersona } from "./persona.js";
 import { getGreeting } from "./greeting.js";
 
@@ -147,6 +147,11 @@ const server = http.createServer((req, res) => {
     if (!authed(url)) return sendJson(res, 401, { error: "口令不对" });
     const detail = getEntityDetail(Number(memoryEntityMatch[1]));
     return detail ? sendJson(res, 200, detail) : sendJson(res, 404, { error: "找不到该实体" });
+  }
+  const memoryCoreMatch = url.pathname.match(/^\/api\/memory\/core\/(ze|maisui)$/);
+  if (memoryCoreMatch) {
+    if (!authed(url)) return sendJson(res, 401, { error: "口令不对" });
+    return sendJson(res, 200, getCoreDetail(memoryCoreMatch[1] as "ze" | "maisui"));
   }
 
   // 首页招呼语：麦穗写给泽的一句话，30 分钟缓存

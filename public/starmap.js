@@ -295,7 +295,15 @@ function handleTap(screenX, screenY, canvas) {
   // screen(css) → world 逆变换
   const wx = (cssX - camera.panX) / camera.scale;
   const wy = (cssY - camera.panY) / camera.scale;
-  // 找最近的实体（半径 + 12px 命中区，缩放时随视觉大小走）
+
+  // 先命中中心双星（比实体大，命中区取球+光晕范围）
+  const coreHitR = 18 / camera.scale;
+  const dZe = Math.hypot(layout.cx - 9 - wx, layout.cy - wy);
+  const dMai = Math.hypot(layout.cx + 9 - wx, layout.cy - wy);
+  if (dZe < coreHitR && dZe <= dMai) return showCoreDetail("ze");
+  if (dMai < coreHitR) return showCoreDetail("maisui");
+
+  // 再找最近的实体
   let hit = null;
   let bestD = Infinity;
   const hitPad = 12 / camera.scale;
@@ -318,29 +326,62 @@ async function showEntityDetail(id) {
     const detail = await res.json();
     document.getElementById("detailKind").textContent = KIND_META[detail.kind]?.label || detail.kind;
     document.getElementById("detailName").textContent = detail.name;
-    const list = document.getElementById("detailFragments");
-    list.innerHTML = "";
-    if (!detail.fragments.length) {
-      const empty = document.createElement("div");
-      empty.className = "detail-frag";
-      empty.textContent = "还没有关于这里的碎片。";
-      list.appendChild(empty);
-    } else {
-      for (const f of detail.fragments) {
-        const div = document.createElement("div");
-        div.className = "detail-frag";
-        const text = document.createElement("div");
-        text.textContent = f.text;
-        const meta = document.createElement("div");
-        meta.className = "detail-frag-meta";
-        meta.textContent = friendlyAge(f.ageDays);
-        div.append(text, meta);
-        list.appendChild(div);
-      }
-    }
+    document.getElementById("detailProfile").hidden = true;  // 普通实体没有 profile
+    renderFragments(detail.fragments, "还没有关于这里的碎片。");
     document.getElementById("memoryDetail").hidden = false;
   } catch {
     /* 静默失败 */
+  }
+}
+
+async function showCoreDetail(who) {
+  const token = localStorage.getItem("home_token") || "";
+  try {
+    const res = await fetch(`/api/memory/core/${who}?token=${encodeURIComponent(token)}`);
+    if (!res.ok) return;
+    const detail = await res.json();
+    document.getElementById("detailKind").textContent = "双星";
+    document.getElementById("detailName").textContent = detail.name;
+    const profileEl = document.getElementById("detailProfile");
+    if (detail.profile) {
+      profileEl.textContent = detail.profile;
+      profileEl.classList.remove("detail-profile-empty");
+    } else {
+      profileEl.textContent = `还没有 ${detail.name} 的 profile。跟麦穗说一声让他给你写进 data/profile-${who}.md。`;
+      profileEl.classList.add("detail-profile-empty");
+    }
+    profileEl.hidden = false;
+    renderFragments(detail.fragments, `暂无关于 ${detail.name} 的碎片记忆。`);
+    document.getElementById("memoryDetail").hidden = false;
+  } catch {
+    /* 静默失败 */
+  }
+}
+
+function renderFragments(fragments, emptyText) {
+  const list = document.getElementById("detailFragments");
+  list.innerHTML = "";
+  if (!fragments.length) {
+    const empty = document.createElement("div");
+    empty.className = "detail-frag";
+    empty.textContent = emptyText;
+    list.appendChild(empty);
+    return;
+  }
+  const title = document.createElement("div");
+  title.className = "detail-frag-section-title";
+  title.textContent = `${fragments.length} 条碎片`;
+  list.appendChild(title);
+  for (const f of fragments) {
+    const div = document.createElement("div");
+    div.className = "detail-frag";
+    const text = document.createElement("div");
+    text.textContent = f.text;
+    const meta = document.createElement("div");
+    meta.className = "detail-frag-meta";
+    meta.textContent = friendlyAge(f.ageDays);
+    div.append(text, meta);
+    list.appendChild(div);
   }
 }
 
