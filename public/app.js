@@ -155,7 +155,21 @@ function addBubble(kind, text) {
   return div;
 }
 
+// 你翻上去看历史时别打扰你：只有原本就贴底才跟着新消息滚。
+// 状态在你滚动时更新；发送新消息或打开会话时强制回到底部。
+let stickToBottom = true;
+messagesEl.addEventListener("scroll", () => {
+  const gap = messagesEl.scrollHeight - (messagesEl.scrollTop + messagesEl.clientHeight);
+  stickToBottom = gap < 40;
+});
+
 function scrollDown() {
+  if (stickToBottom) messagesEl.scrollTop = messagesEl.scrollHeight;
+}
+
+// 用户主动动作触发（发消息、拍一拍、打开会话）：无条件回底。
+function forceScrollDown() {
+  stickToBottom = true;
   messagesEl.scrollTop = messagesEl.scrollHeight;
 }
 
@@ -186,6 +200,8 @@ function sendMessage() {
   stopBtn.hidden = false;
   showTyping();
   ws.send(JSON.stringify({ type: "chat", sessionId, text, attachments }));
+  // 你刚发了消息，肯定想看到，无条件贴底
+  forceScrollDown();
 }
 
 // —— 附件 ——
@@ -278,6 +294,7 @@ function sendPat() {
   stopBtn.hidden = false;
   showTyping();
   ws.send(JSON.stringify({ type: "pat", sessionId }));
+  forceScrollDown();
 }
 document.querySelector(".avatar").addEventListener("dblclick", sendPat);
 
@@ -531,6 +548,7 @@ async function openSession(id) {
       }
     }
   }
+  forceScrollDown();
   closeDrawer();
   loadSessions();
 }
