@@ -4,12 +4,13 @@
 
 /* global memoryGraph */
 
+// 浅色底下的 kind 配色：饱和度略降，避免刺眼；每个色跟米黄底能拉开对比
 const KIND_META = {
-  person:  { label: "社交", color: "#e8ba6a", angleDeg: 270 }, // 正上
-  place:   { label: "地点", color: "#8ac2ea", angleDeg: 342 }, // 右上
-  event:   { label: "事件", color: "#e8846a", angleDeg:  54 }, // 右下
-  hobby:   { label: "爱好", color: "#c19aea", angleDeg: 126 }, // 左下
-  project: { label: "项目", color: "#7fdea3", angleDeg: 198 }, // 左上
+  person:  { label: "社交", color: "#d4954a", angleDeg: 270 }, // 正上，赭黄
+  place:   { label: "地点", color: "#5a94c2", angleDeg: 342 }, // 右上，湖蓝
+  event:   { label: "事件", color: "#c9673f", angleDeg:  54 }, // 右下，主色橙
+  hobby:   { label: "爱好", color: "#9068c0", angleDeg: 126 }, // 左下，紫
+  project: { label: "项目", color: "#5aa87a", angleDeg: 198 }, // 左上，青
 };
 const GOLDEN = Math.PI * (3 - Math.sqrt(5));
 
@@ -76,15 +77,15 @@ function backgroundStars(W, H) {
   if (_bgCache && _bgCache.W === W && _bgCache.H === H) return _bgCache.list;
   const list = [];
   const r = seededRng(42);
-  // 密度提上来，星尘更有分量；小尺寸的偏多，几颗亮的做点缀
-  const n = Math.max(120, Math.floor((W * H) / 2400));
+  // 浅色底下"星尘"更像纸上的墨点，密度小一点、alpha 低一点，别喧宾夺主
+  const n = Math.max(80, Math.floor((W * H) / 3800));
   for (let i = 0; i < n; i++) {
     const bright = r() > 0.94;
     list.push({
       x: r() * W,
       y: r() * H,
-      r: bright ? r() * 1.4 + 0.9 : r() * 0.75 + 0.15,
-      alpha: bright ? r() * 0.4 + 0.55 : r() * 0.45 + 0.12,
+      r: bright ? r() * 1.2 + 0.7 : r() * 0.6 + 0.2,
+      alpha: bright ? r() * 0.25 + 0.22 : r() * 0.18 + 0.06,
     });
   }
   _bgCache = { W, H, list };
@@ -115,9 +116,9 @@ function renderStarmap() {
 
   // 底 + 星尘（不受相机影响，星尘是"窗外"的）
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-  ctx.fillStyle = "#0d0f18";
+  ctx.fillStyle = "#f6efe4";  // --bg 米黄
   ctx.fillRect(0, 0, cssW, cssH);
-  ctx.fillStyle = "#e0d5b8";
+  ctx.fillStyle = "#8a7860";  // 暖棕墨点
   for (const s of backgroundStars(cssW, cssH)) {
     ctx.globalAlpha = s.alpha;
     ctx.beginPath();
@@ -135,19 +136,18 @@ function renderStarmap() {
   ctx.translate(camera.panX * dpr, camera.panY * dpr);
   ctx.scale(camera.scale, camera.scale);
 
-  // 方位标签（每个 kind 星系的题头，淡且宁静，不抢星点风头）
+  // 方位标签（淡雅题头，不抢星点风头）
   ctx.font = `${13 / camera.scale}px "Songti SC", "SimSun", serif`;
   ctx.textAlign = "center";
-  ctx.fillStyle = "rgba(240, 231, 211, 0.28)";
+  ctx.fillStyle = "rgba(90, 70, 45, 0.32)";
   for (const g of layout.galaxies) {
-    // 标签放在星系中心稍偏外一点，避免和圆点重叠
     const outAng = (g.meta.angleDeg * Math.PI) / 180;
     const outR = 24 / camera.scale;
     ctx.fillText(g.meta.label, g.gx + Math.cos(outAng) * outR, g.gy + Math.sin(outAng) * outR);
   }
 
-  // 桥线
-  ctx.strokeStyle = "rgba(200, 190, 160, 0.22)";
+  // 桥线（墨色淡笔）
+  ctx.strokeStyle = "rgba(60, 40, 20, 0.22)";
   for (const link of links) {
     const a = layout.positions.get(link.a);
     const b = layout.positions.get(link.b);
@@ -163,8 +163,9 @@ function renderStarmap() {
   ctx.font = `${12 / camera.scale}px "Songti SC", "SimSun", serif`;
   ctx.textAlign = "center";
   for (const p of layout.positions.values()) {
+    // 浅色底下的"光晕"改成向 bg 淡出的柔化环，别太亮
     const glow = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, p.r * 3.2);
-    glow.addColorStop(0, p.color + "b0");
+    glow.addColorStop(0, p.color + "55");
     glow.addColorStop(1, p.color + "00");
     ctx.fillStyle = glow;
     ctx.beginPath();
@@ -174,23 +175,23 @@ function renderStarmap() {
     ctx.beginPath();
     ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
     ctx.fill();
-    ctx.fillStyle = "#f0e7d3";
+    ctx.fillStyle = "#3a3026";  // --ink 墨色
     ctx.fillText(p.entity.name, p.x, p.y + p.r + 14 / camera.scale);
   }
 
   // 中间双星：两颗紧挨的球 + 一条居中的合并标签
-  drawCoreOrb(ctx, layout.cx - 9, layout.cy, "#f5cf7a");
-  drawCoreOrb(ctx, layout.cx + 9, layout.cy, "#e6a468");
+  drawCoreOrb(ctx, layout.cx - 9, layout.cy, "#c9673f");  // 主色橙
+  drawCoreOrb(ctx, layout.cx + 9, layout.cy, "#d4954a");  // 赭黄
   ctx.font = `${11 / camera.scale}px "Songti SC", "SimSun", serif`;
   ctx.textAlign = "center";
-  ctx.fillStyle = "#f0e7d3";
+  ctx.fillStyle = "#3a3026";
   ctx.fillText("泽 · 麦穗", layout.cx, layout.cy + 30 / camera.scale);
 }
 
 // 只画球+光晕，不带 label（合并标签由 renderStarmap 统一居中画）
 function drawCoreOrb(ctx, x, y, color) {
   const glow = ctx.createRadialGradient(x, y, 0, x, y, 24);
-  glow.addColorStop(0, color + "cc");
+  glow.addColorStop(0, color + "66");
   glow.addColorStop(1, color + "00");
   ctx.fillStyle = glow;
   ctx.beginPath();
