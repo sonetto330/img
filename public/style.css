@@ -82,6 +82,7 @@ header button {
 .typing span:nth-child(3) { animation-delay: .4s; }
 @keyframes blink { 0%, 60%, 100% { opacity: .25; } 30% { opacity: .9; } }
 
+.pending[hidden] { display: none; }
 .pending {
   display: flex; align-items: center; gap: 8px;
   padding: 8px 12px; background: var(--panel); border-top: 1px solid var(--line);
@@ -99,7 +100,7 @@ header button {
 
 footer .attach {
   background: none; border: 1px solid var(--line); color: var(--muted);
-  border-radius: 12px; padding: 8px 13px; font-size: 17px; line-height: 1;
+  border-radius: 12px; padding: 8px 10px; font-size: 16px; line-height: 1.2;
 }
 
 footer {

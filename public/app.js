@@ -161,18 +161,22 @@ function sendMessage() {
 }
 
 // —— 附件 ——
-const attachBtn = $("attachBtn");
+const imgInput = $("imgInput");
 const fileInput = $("fileInput");
 const pendingBar = $("pendingBar");
 const pendingThumb = $("pendingThumb");
 const pendingName = $("pendingName");
 let pending = null; // { file, name, kind }
 
-attachBtn.onclick = () => fileInput.click();
+$("imgBtn").onclick = () => imgInput.click();   // 手机上直接弹相册/拍照
+$("fileBtn").onclick = () => fileInput.click(); // 选任意文件
 
-fileInput.onchange = async () => {
-  const f = fileInput.files[0];
-  fileInput.value = "";
+imgInput.onchange = () => pickFile(imgInput);
+fileInput.onchange = () => pickFile(fileInput);
+
+async function pickFile(input) {
+  const f = input.files[0];
+  input.value = "";
   if (!f) return;
   if (f.size > 30 * 1024 * 1024) return addBubble("error", "文件太大，上限 30MB");
   pendingName.textContent = "上传中…";
@@ -195,7 +199,7 @@ fileInput.onchange = async () => {
     clearPending();
     addBubble("error", `上传失败：${e.message}`);
   }
-};
+}
 
 $("pendingRemove").onclick = clearPending;
 
