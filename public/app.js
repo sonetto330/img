@@ -541,6 +541,7 @@ async function loadMemoryGraph() {
       ? `${n} 个星座 · ${graph.links.length} 条桥`
       : "";
     $("memoryEmpty").hidden = n > 0;
+    if (typeof window.attachStarmapGestures === "function") window.attachStarmapGestures();
     if (typeof window.renderStarmap === "function") window.renderStarmap();
   } catch {
     $("memoryEmpty").hidden = false;

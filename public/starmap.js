@@ -85,7 +85,9 @@ function backgroundStars(W, H) {
   return list;
 }
 
-// 当前布局，暴露给 I.3 交互层做点击命中测试
+// 相机：手势拖动/缩放的状态
+const camera = { scale: 1, panX: 0, panY: 0 };
+// 当前布局，暴露给交互层做点击命中测试
 window.starmapLayout = null;
 
 function renderStarmap() {
@@ -95,7 +97,6 @@ function renderStarmap() {
   const cssW = canvas.clientWidth;
   const cssH = canvas.clientHeight;
   if (cssW === 0 || cssH === 0) {
-    // 视图刚打开，DOM 还没量出来，下一帧再来
     requestAnimationFrame(renderStarmap);
     return;
   }
@@ -105,9 +106,9 @@ function renderStarmap() {
     canvas.height = cssH * dpr;
   }
   const ctx = canvas.getContext("2d");
-  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
 
-  // 底 + 星尘
+  // 底 + 星尘（不受相机影响，星尘是"窗外"的）
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   ctx.fillStyle = "#0d0f18";
   ctx.fillRect(0, 0, cssW, cssH);
   ctx.fillStyle = "#e0d5b8";
@@ -124,13 +125,17 @@ function renderStarmap() {
   const layout = buildLayout(cssW, cssH, entities);
   window.starmapLayout = layout;
 
-  // 桥线（先画，落在圆下）
+  // 应用相机变换，之后所有绘制走世界坐标
+  ctx.translate(camera.panX * dpr, camera.panY * dpr);
+  ctx.scale(camera.scale, camera.scale);
+
+  // 桥线
   ctx.strokeStyle = "rgba(200, 190, 160, 0.22)";
   for (const link of links) {
     const a = layout.positions.get(link.a);
     const b = layout.positions.get(link.b);
     if (!a || !b) continue;
-    ctx.lineWidth = Math.min(2.4, 0.4 + Math.log2(1 + link.weight) * 0.5);
+    ctx.lineWidth = Math.min(2.4, 0.4 + Math.log2(1 + link.weight) * 0.5) / camera.scale;
     ctx.beginPath();
     ctx.moveTo(a.x, a.y);
     ctx.lineTo(b.x, b.y);
@@ -138,10 +143,9 @@ function renderStarmap() {
   }
 
   // 实体
-  ctx.font = '12px "Songti SC", "SimSun", serif';
+  ctx.font = `${12 / camera.scale}px "Songti SC", "SimSun", serif`;
   ctx.textAlign = "center";
   for (const p of layout.positions.values()) {
-    // 光晕
     const glow = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, p.r * 3.2);
     glow.addColorStop(0, p.color + "b0");
     glow.addColorStop(1, p.color + "00");
@@ -149,17 +153,15 @@ function renderStarmap() {
     ctx.beginPath();
     ctx.arc(p.x, p.y, p.r * 3.2, 0, Math.PI * 2);
     ctx.fill();
-    // 主圆
     ctx.fillStyle = p.color;
     ctx.beginPath();
     ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
     ctx.fill();
-    // 名字
     ctx.fillStyle = "#f0e7d3";
-    ctx.fillText(p.entity.name, p.x, p.y + p.r + 14);
+    ctx.fillText(p.entity.name, p.x, p.y + p.r + 14 / camera.scale);
   }
 
-  // 中间双星（泽 + 麦穗）
+  // 中间双星
   drawCore(ctx, layout.cx - 9, layout.cy, "#f5cf7a", "泽");
   drawCore(ctx, layout.cx + 9, layout.cy, "#e6a468", "麦穗");
 }
@@ -187,4 +189,159 @@ window.addEventListener("resize", () => {
   if (!document.getElementById("memoryView").hidden) renderStarmap();
 });
 
+// —— 手势：单指平移、双指 pinch 缩放、单指点击选中 —— //
+const pointers = new Map();
+let pinchState = null;
+
+function attachStarmapGestures() {
+  const canvas = document.getElementById("memoryCanvas");
+  if (!canvas || canvas.dataset.gestureBound) return;
+  canvas.dataset.gestureBound = "1";
+
+  canvas.addEventListener("pointerdown", (e) => {
+    e.preventDefault();
+    canvas.setPointerCapture(e.pointerId);
+    pointers.set(e.pointerId, {
+      x: e.clientX, y: e.clientY,
+      downX: e.clientX, downY: e.clientY,
+      downT: Date.now(), moved: false,
+    });
+    if (pointers.size === 2) startPinch();
+  });
+
+  canvas.addEventListener("pointermove", (e) => {
+    const p = pointers.get(e.pointerId);
+    if (!p) return;
+    const dx = e.clientX - p.x;
+    const dy = e.clientY - p.y;
+    p.x = e.clientX;
+    p.y = e.clientY;
+    if (Math.hypot(e.clientX - p.downX, e.clientY - p.downY) > 6) p.moved = true;
+
+    if (pointers.size === 1) {
+      // 单指拖动 = 平移
+      camera.panX += dx;
+      camera.panY += dy;
+      renderStarmap();
+    } else if (pointers.size === 2 && pinchState) {
+      updatePinch();
+    }
+  });
+
+  const endPointer = (e) => {
+    const p = pointers.get(e.pointerId);
+    pointers.delete(e.pointerId);
+    if (pointers.size < 2) pinchState = null;
+    if (!p) return;
+    // 单指、没拖过、时间短 → 视为点击
+    if (!p.moved && Date.now() - p.downT < 500 && pointers.size === 0) {
+      handleTap(p.x, p.y, canvas);
+    }
+  };
+  canvas.addEventListener("pointerup", endPointer);
+  canvas.addEventListener("pointercancel", endPointer);
+}
+
+function startPinch() {
+  const [a, b] = [...pointers.values()];
+  pinchState = {
+    initDist: Math.hypot(a.x - b.x, a.y - b.y),
+    initScale: camera.scale,
+    initCx: (a.x + b.x) / 2,
+    initCy: (a.y + b.y) / 2,
+    initPanX: camera.panX,
+    initPanY: camera.panY,
+  };
+}
+function updatePinch() {
+  const [a, b] = [...pointers.values()];
+  const dist = Math.hypot(a.x - b.x, a.y - b.y);
+  const cx = (a.x + b.x) / 2;
+  const cy = (a.y + b.y) / 2;
+  const rawScale = pinchState.initScale * (dist / pinchState.initDist);
+  const newScale = Math.max(0.4, Math.min(4, rawScale));
+  const ratio = newScale / pinchState.initScale;
+  camera.scale = newScale;
+  // 让两指中心的世界坐标点保持不动
+  camera.panX = cx - (pinchState.initCx - pinchState.initPanX) * ratio;
+  camera.panY = cy - (pinchState.initCy - pinchState.initPanY) * ratio;
+  renderStarmap();
+}
+
+function handleTap(screenX, screenY, canvas) {
+  const layout = window.starmapLayout;
+  if (!layout) return;
+  const rect = canvas.getBoundingClientRect();
+  const cssX = screenX - rect.left;
+  const cssY = screenY - rect.top;
+  // screen(css) → world 逆变换
+  const wx = (cssX - camera.panX) / camera.scale;
+  const wy = (cssY - camera.panY) / camera.scale;
+  // 找最近的实体（半径 + 12px 命中区，缩放时随视觉大小走）
+  let hit = null;
+  let bestD = Infinity;
+  const hitPad = 12 / camera.scale;
+  for (const p of layout.positions.values()) {
+    const d = Math.hypot(p.x - wx, p.y - wy);
+    if (d < p.r + hitPad && d < bestD) {
+      bestD = d;
+      hit = p;
+    }
+  }
+  if (hit) showEntityDetail(hit.entity.id);
+  else hideEntityDetail();
+}
+
+async function showEntityDetail(id) {
+  const token = localStorage.getItem("home_token") || "";
+  try {
+    const res = await fetch(`/api/memory/entity/${id}?token=${encodeURIComponent(token)}`);
+    if (!res.ok) return;
+    const detail = await res.json();
+    document.getElementById("detailKind").textContent = KIND_META[detail.kind]?.label || detail.kind;
+    document.getElementById("detailName").textContent = detail.name;
+    const list = document.getElementById("detailFragments");
+    list.innerHTML = "";
+    if (!detail.fragments.length) {
+      const empty = document.createElement("div");
+      empty.className = "detail-frag";
+      empty.textContent = "还没有关于这里的碎片。";
+      list.appendChild(empty);
+    } else {
+      for (const f of detail.fragments) {
+        const div = document.createElement("div");
+        div.className = "detail-frag";
+        const text = document.createElement("div");
+        text.textContent = f.text;
+        const meta = document.createElement("div");
+        meta.className = "detail-frag-meta";
+        meta.textContent = friendlyAge(f.ageDays);
+        div.append(text, meta);
+        list.appendChild(div);
+      }
+    }
+    document.getElementById("memoryDetail").hidden = false;
+  } catch {
+    /* 静默失败 */
+  }
+}
+
+function hideEntityDetail() {
+  document.getElementById("memoryDetail").hidden = true;
+}
+
+function friendlyAge(days) {
+  if (days <= 0) return "今天";
+  if (days === 1) return "昨天";
+  if (days <= 7) return days + " 天前";
+  if (days <= 30) return days + " 天前";
+  if (days <= 60) return "一个多月前";
+  if (days <= 120) return "两三个月前";
+  if (days <= 240) return "半年多前";
+  if (days <= 400) return "去年";
+  return "很久以前";
+}
+
+// 进入记忆库时惰性绑定手势（canvas 不存在时会跳过）
+window.attachStarmapGestures = attachStarmapGestures;
 window.renderStarmap = renderStarmap;
