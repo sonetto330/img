@@ -8,7 +8,7 @@ import type { Options } from "@anthropic-ai/claude-agent-sdk";
 import { randomUUID } from "node:crypto";
 import { SessionStore, type Attachment } from "./sessions.js";
 import { runTurn, type TurnHandle } from "./engine.js";
-import { loadModePrompt } from "./modes.js";
+import { getMode, loadModePrompt, type ToolEvent } from "./modes.js";
 import { barkPush } from "./bark.js";
 import { synthesize, ttsEnabled } from "./tts.js";
 
@@ -245,6 +245,7 @@ wss.on("connection", (ws: WebSocket, req) => {
       store.save(record);
       send({ type: "session", sessionId: record.id, title: record.title, mode: record.mode });
 
+      // 拍一拍不动工具，就不装 mcpServers；模式提示词还是照常挂
       active = runTurn(
         {
           prompt: "（泽拍了拍你，用一两句话回应，别干活）",
@@ -313,6 +314,10 @@ wss.on("connection", (ws: WebSocket, req) => {
       .join("\n");
     const prompt = attLines ? `${attLines}\n\n${text || "（没写字，看内容吧）"}` : text;
 
+    // 装配当前模式的工具：emit 闭包直接把事件推给这条 WS 连接
+    const emit = (event: ToolEvent) => send({ type: "custom", event });
+    const built = getMode(record.mode).buildTools?.(emit);
+
     active = runTurn(
       {
         prompt,
@@ -321,6 +326,8 @@ wss.on("connection", (ws: WebSocket, req) => {
         permissionMode: PERMISSION_MODE,
         persona: loadPersona(),
         modePrompt: loadModePrompt(record.mode),
+        mcpServers: built?.mcpServers,
+        allowedTools: built?.allowedTools,
       },
       {
         onClaudeSession(claudeSessionId) {

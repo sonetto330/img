@@ -26,6 +26,10 @@ export interface TurnOptions {
   persona?: string;
   /** 当前会话模式的附加提示词，接在人设之后；不填就没这一层 */
   modePrompt?: string;
+  /** 当前模式挂载的 SDK MCP 工具 */
+  mcpServers?: Options["mcpServers"];
+  /** 允许模型调用的工具白名单（不传就用 SDK 默认全放开） */
+  allowedTools?: string[];
   /** 模型别名或 id，比如 "haiku"；不填走默认 */
   model?: string;
   /** 单轮里最多几步；拍一拍这类"不动工具"的场景传 1 */
@@ -52,6 +56,8 @@ export function runTurn(opts: TurnOptions, cb: TurnCallbacks): TurnHandle {
       includePartialMessages: true,
       model: opts.model,
       maxTurns: opts.maxTurns,
+      mcpServers: opts.mcpServers,
+      allowedTools: opts.allowedTools,
       systemPrompt: {
         type: "preset",
         preset: "claude_code",

@@ -1,14 +1,25 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import type { Options } from "@anthropic-ai/claude-agent-sdk";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const root = path.join(here, "..");
 const PROMPTS_DIR = path.join(root, "prompts");
 
+/** 工具向前端推送的事件；type 是事件名，其他字段随便附加 */
+export type ToolEvent = { type: string; [key: string]: unknown };
+
+/** 模式给外部提供的工具装备：MCP 服务端 + 允许模型调用的工具白名单 */
+export interface ModeTools {
+  mcpServers?: Options["mcpServers"];
+  allowedTools?: string[];
+}
+
 /**
- * 模式定义：会话所处的对话模式。后续期数会给每个模式加专属工具（mcpServers、
- * allowedExtraTools），这一版先只放身份和提示词文件名。
+ * 模式定义：会话所处的对话模式。
+ * buildTools 拿到 emit 闭包，构造这个模式专属的 SDK MCP 工具；工具 handler 里
+ * 调 emit 就能把结果推到当前 WebSocket 前端（比如骰子结果、地图定位）。
  */
 export interface ModeDef {
   id: string;
@@ -16,6 +27,8 @@ export interface ModeDef {
   label: string;
   /** prompts/ 目录下的附加提示词文件名；空表示该模式无附加提示词 */
   promptFile?: string;
+  /** 构造该模式的工具；不实现就没有专属工具 */
+  buildTools?: (emit: (event: ToolEvent) => void) => ModeTools;
 }
 
 /**
