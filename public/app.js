@@ -388,9 +388,19 @@ async function api(pathname) {
 
 async function loadSessions() {
   const sessions = await api("/api/sessions");
-  // 顺手把首页的消息总数刷了
+  // 顺手把首页的消息总数刷了；0 条时换文案，别把冷冰冰的"0"挂在墙上
   const total = sessions.reduce((n, s) => n + (s.messageCount || 0), 0);
-  if (msgCountEl) msgCountEl.textContent = total;
+  const row = $("msgCountRow");
+  if (row) {
+    if (total === 0) {
+      row.classList.add("empty");
+      $("msgCountUnit").textContent = "还没聊过";
+    } else {
+      row.classList.remove("empty");
+      msgCountEl.textContent = total;
+      $("msgCountUnit").textContent = "条消息 · 全部会话";
+    }
+  }
   listEl.innerHTML = "";
   for (const s of sessions) {
     const li = document.createElement("li");

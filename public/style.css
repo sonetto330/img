@@ -9,6 +9,8 @@
   --accent-soft: #f3e2d3;
   --line: #eadfce;
   --online: #58b368;
+  /* 中英文都是衬线，iOS 走宋体 SC，Windows 走 SimSun，都没有再回 Georgia */
+  --serif: "Songti SC", "STSong", "SimSun", Georgia, "Times New Roman", serif;
 }
 
 html, body { height: 100%; }
@@ -242,46 +244,54 @@ footer textarea:focus { border-color: var(--accent-soft); }
 .home-scroll {
   height: 100dvh; overflow-y: auto;
   padding:
-    calc(24px + env(safe-area-inset-top))
-    max(20px, calc((100% - 500px) / 2))
-    calc(78px + env(safe-area-inset-bottom));
+    calc(28px + env(safe-area-inset-top))
+    max(22px, calc((100% - 500px) / 2))
+    calc(88px + env(safe-area-inset-bottom));
 }
 .home-top {
   display: flex; justify-content: space-between; align-items: flex-start;
-  margin-bottom: 26px;
+  margin-bottom: 34px;
 }
 .clock .time {
-  font-size: 46px; font-weight: 300; line-height: 1;
+  font-size: 52px; font-weight: 300; line-height: 1;
   letter-spacing: -1px; color: var(--ink);
-  font-family: Georgia, "Times New Roman", serif;
+  font-family: var(--serif);
 }
 .clock .date {
-  font-size: 12.5px; color: var(--muted); margin-top: 5px;
-  letter-spacing: .3px;
+  font-size: 13px; color: var(--muted); margin-top: 7px;
+  letter-spacing: .3px; font-family: var(--serif);
 }
-.weather .temp { font-size: 20px; color: var(--muted); }
 
 .greeting {
-  font-size: 22px; font-weight: 400; line-height: 1.35;
-  color: var(--ink); font-family: Georgia, "Times New Roman", serif;
-  margin-bottom: 26px;
+  font-size: 30px; font-weight: 400; line-height: 1.35;
+  color: var(--ink); font-family: var(--serif);
+  margin-bottom: 42px;
 }
 
-.together { margin-bottom: 10px; }
+/* 分割线代替生硬间距，两条内容之间的呼吸感 */
+.home-divider {
+  width: 32px; height: 1px; background: var(--line);
+  margin: 0 0 22px;
+}
+
+.together { margin-bottom: 18px; }
 .together-days { line-height: 1; }
 .together-days .num {
-  font-size: 46px; font-weight: 300; color: var(--accent);
-  font-family: Georgia, "Times New Roman", serif;
+  font-size: 60px; font-weight: 300; color: var(--accent);
+  font-family: var(--serif); letter-spacing: -1px;
 }
-.together-days .unit { font-size: 15px; color: var(--muted); margin-left: 6px; }
-.together-sub { font-size: 12px; color: var(--muted); margin-top: 3px; }
+.together-days .unit { font-size: 17px; color: var(--muted); margin-left: 8px; font-family: var(--serif); }
+.together-sub { font-size: 12.5px; color: var(--muted); margin-top: 6px; font-family: var(--serif); }
 
-.msg-count { margin: 14px 0 24px; line-height: 1; }
+.msg-count { margin-bottom: 38px; line-height: 1; }
+.msg-count[hidden] { display: none; }
 .msg-count .num {
-  font-size: 30px; font-weight: 300; color: var(--accent);
-  font-family: Georgia, "Times New Roman", serif;
+  font-size: 38px; font-weight: 300; color: var(--accent);
+  font-family: var(--serif);
 }
-.msg-count .unit { font-size: 12.5px; color: var(--muted); margin-left: 6px; }
+.msg-count .unit { font-size: 13px; color: var(--muted); margin-left: 8px; font-family: var(--serif); }
+.msg-count.empty .num { display: none; }
+.msg-count.empty .unit { margin-left: 0; font-size: 14px; font-style: italic; }
 
 .home-grid {
   display: grid;
@@ -291,13 +301,13 @@ footer textarea:focus { border-color: var(--accent-soft); }
 .card {
   background: var(--panel);
   border: 1px solid var(--line);
-  border-radius: 16px;
-  padding: 16px 15px;
+  border-radius: 18px;
+  padding: 18px 17px;
   text-align: left;
   cursor: pointer;
   font: inherit;
   color: var(--ink);
-  display: flex; flex-direction: column; gap: 6px;
+  display: flex; flex-direction: column; gap: 8px;
   transition: border-color .15s, transform .1s;
   touch-action: manipulation;
 }
@@ -307,10 +317,12 @@ footer textarea:focus { border-color: var(--accent-soft); }
 .card-chat {
   grid-column: 1 / -1;
   background: linear-gradient(135deg, var(--accent-soft) 0%, var(--panel) 70%);
+  padding: 22px 20px;
 }
-.card-icon { font-size: 24px; line-height: 1; }
-.card-title { font-size: 15px; font-weight: 600; }
-.card-sub { font-size: 12px; color: var(--muted); }
+.card-chat .card-title { font-size: 18px; }
+.card-icon { font-size: 26px; line-height: 1; }
+.card-title { font-size: 16px; font-weight: 600; font-family: var(--serif); }
+.card-sub { font-size: 12.5px; color: var(--muted); }
 
 /* —— 底部导航 —— */
 .bottom-nav {
