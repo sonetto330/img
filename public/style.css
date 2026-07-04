@@ -119,6 +119,7 @@ header button#menuBtn {
   border-radius: 12px; padding: 9px 12px;
   display: flex; flex-wrap: wrap; gap: 6px; align-items: flex-start;
 }
+.toolbox-list[hidden] { display: none; }
 /* 没有详情的工具：小标签横排，不占整行 */
 .tool-item {
   font-size: 12px; color: var(--muted);
