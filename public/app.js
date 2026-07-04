@@ -109,6 +109,7 @@ function newToolbox() {
       item.appendChild(nm);
       const detail = typeof tool === "string" ? undefined : tool.detail;
       if (detail) {
+        item.classList.add("wide");
         const d = document.createElement("div");
         d.className = "tool-input";
         d.textContent = detail;
