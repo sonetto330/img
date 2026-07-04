@@ -204,6 +204,52 @@ wss.on("connection", (ws: WebSocket, req) => {
       return;
     }
 
+    if (msg.type === "pat") {
+      if (active) return send({ type: "error", message: "上一条还在跑，等等或者先打断" });
+      const record = (msg.sessionId && store.get(msg.sessionId)) || store.create();
+      // 拍一拍不改标题；存历史用固定文本，前端识别后显示成居中小字
+      record.messages.push({ role: "user", text: "（拍了拍你）", at: new Date().toISOString() });
+      store.save(record);
+      send({ type: "session", sessionId: record.id, title: record.title });
+
+      active = runTurn(
+        {
+          prompt: "（泽拍了拍你，用一两句话回应，别干活）",
+          resume: record.claudeSessionId,
+          cwd: WORKSPACE,
+          permissionMode: PERMISSION_MODE,
+          persona: loadPersona(),
+          model: "haiku",
+          maxTurns: 1,
+        },
+        {
+          onClaudeSession(claudeSessionId) {
+            record.claudeSessionId = claudeSessionId;
+            store.save(record);
+          },
+          onDelta(text) {
+            send({ type: "delta", text });
+          },
+          onTool(tool) {
+            send({ type: "tool", name: tool.name, detail: tool.detail });
+          },
+          onDone(finalText, tools) {
+            active = null;
+            record.messages.push({ role: "assistant", text: finalText, tools, at: new Date().toISOString() });
+            store.save(record);
+            send({ type: "done", text: finalText });
+            if (!anyoneWatching()) barkPush("麦穗", finalText).catch(() => {});
+          },
+          onError(message) {
+            active = null;
+            send({ type: "error", message });
+            if (!anyoneWatching()) barkPush("麦穗（出错）", message).catch(() => {});
+          },
+        },
+      );
+      return;
+    }
+
     // 附件校验：只认 uploads 目录里真实存在的文件
     const attachments: Attachment[] = (msg.attachments || [])
       .filter((a) => a && typeof a.file === "string")

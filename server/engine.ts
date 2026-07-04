@@ -24,6 +24,10 @@ export interface TurnOptions {
   permissionMode: Options["permissionMode"];
   /** 人设内容（CLAUDE.md 全文），每一轮都直接注入系统提示，保证生效 */
   persona?: string;
+  /** 模型别名或 id，比如 "haiku"；不填走默认 */
+  model?: string;
+  /** 单轮里最多几步；拍一拍这类"不动工具"的场景传 1 */
+  maxTurns?: number;
 }
 
 export function runTurn(opts: TurnOptions, cb: TurnCallbacks): TurnHandle {
@@ -34,6 +38,8 @@ export function runTurn(opts: TurnOptions, cb: TurnCallbacks): TurnHandle {
       resume: opts.resume,
       permissionMode: opts.permissionMode,
       includePartialMessages: true,
+      model: opts.model,
+      maxTurns: opts.maxTurns,
       systemPrompt: {
         type: "preset",
         preset: "claude_code",

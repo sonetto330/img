@@ -250,6 +250,27 @@ function attachToBubble(bubble, att, before) {
 
 sendBtn.onclick = sendMessage;
 stopBtn.onclick = () => ws?.send(JSON.stringify({ type: "interrupt" }));
+
+// —— 拍一拍：双击头像 ——
+function patNote() {
+  const note = document.createElement("div");
+  note.className = "msg pat";
+  note.textContent = "你拍了拍麦穗";
+  messagesEl.appendChild(note);
+  scrollDown();
+}
+function sendPat() {
+  if (busy || !ws || ws.readyState !== 1) return;
+  patNote();
+  busy = true;
+  dotEl.classList.add("busy");
+  statusTextEl.textContent = "正在干活…";
+  sendBtn.hidden = true;
+  stopBtn.hidden = false;
+  showTyping();
+  ws.send(JSON.stringify({ type: "pat", sessionId }));
+}
+document.querySelector(".avatar").addEventListener("dblclick", sendPat);
 inputEl.addEventListener("keydown", (e) => {
   if (e.key === "Enter" && !e.shiftKey && !e.isComposing) {
     e.preventDefault();
@@ -374,8 +395,12 @@ async function openSession(id) {
     }
     if (m.text || m.attachments?.length) {
       if (m.role === "user") {
-        const bubble = addBubble("me", m.text || "");
-        for (const att of m.attachments || []) attachToBubble(bubble, att, true);
+        if (m.text === "（拍了拍你）" && !m.attachments?.length) {
+          patNote();
+        } else {
+          const bubble = addBubble("me", m.text || "");
+          for (const att of m.attachments || []) attachToBubble(bubble, att, true);
+        }
       } else {
         renderMd(addBubble("ta", ""), m.text);
       }

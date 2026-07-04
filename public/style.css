@@ -39,6 +39,8 @@ header button#menuBtn {
   position: relative; width: 38px; height: 38px; border-radius: 50%;
   background: linear-gradient(135deg, #e0824f, var(--accent));
   display: grid; place-items: center; font-size: 19px;
+  cursor: pointer; user-select: none; -webkit-user-select: none;
+  touch-action: manipulation; /* iOS 别拿双击去缩放 */
 }
 .avatar i {
   position: absolute; right: -1px; bottom: -1px;
@@ -71,6 +73,7 @@ header button#menuBtn {
   box-shadow: 0 1px 3px rgba(160, 90, 50, .18);
 }
 .msg.error { align-self: center; background: #fbe9e4; color: #a33f22; font-size: 13px; border-radius: 10px; }
+.msg.pat { align-self: center; background: none; color: var(--muted); font-size: 12px; padding: 4px 12px; }
 
 /* Markdown 渲染后的气泡 */
 .msg.md { white-space: normal; }
