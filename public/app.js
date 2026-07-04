@@ -11,11 +11,11 @@ const messagesEl = $("messages");
 const inputEl = $("input");
 const sendBtn = $("sendBtn");
 const stopBtn = $("stopBtn");
-const statusEl = $("status");
+const dotEl = $("dot");
+const statusTextEl = $("statusText");
 const drawerEl = $("drawer");
 const maskEl = $("mask");
 const listEl = $("sessionList");
-const titleEl = $("title");
 
 let ws = null;
 let sessionId = localStorage.getItem("home_session") || null;
@@ -44,13 +44,8 @@ function handle(msg) {
       break;
     case "tool": {
       hideTyping();
-      if (!liveTools) {
-        liveTools = document.createElement("div");
-        liveTools.className = "tools";
-        messagesEl.appendChild(liveTools);
-      }
-      addToolChip(liveTools, msg);
-      scrollDown();
+      if (!liveTools) liveTools = newToolbox();
+      liveTools.add(msg);
       break;
     }
     case "done":
@@ -76,31 +71,53 @@ function finishTurn() {
   liveBubble = null;
   liveTools = null;
   hideTyping();
-  statusEl.classList.remove("busy");
+  dotEl.classList.remove("busy");
+  statusTextEl.textContent = "在线";
   sendBtn.hidden = false;
   stopBtn.hidden = true;
   scrollDown();
 }
 
-// —— 工具标签（点一下展开看他具体干了啥） ——
-function addToolChip(container, tool) {
-  const name = typeof tool === "string" ? tool : tool.name;
-  const detail = typeof tool === "string" ? undefined : tool.detail;
-  const chip = document.createElement("span");
-  chip.className = "chip";
-  chip.textContent = `🔧 ${name}`;
-  if (detail) {
-    chip.classList.add("has-detail");
-    const pre = document.createElement("pre");
-    pre.className = "tool-detail";
-    pre.textContent = detail;
-    pre.hidden = true;
-    chip.onclick = () => { pre.hidden = !pre.hidden; scrollDown(); };
-    container.appendChild(chip);
-    container.appendChild(pre);
-    return;
-  }
-  container.appendChild(chip);
+// —— 工具折叠盒（“使用 N 个工具”，点开看每一步） ——
+function newToolbox() {
+  const box = document.createElement("div");
+  box.className = "toolbox";
+  const head = document.createElement("button");
+  head.className = "toolbox-head";
+  const list = document.createElement("div");
+  list.className = "toolbox-list";
+  list.hidden = true;
+  head.onclick = () => {
+    list.hidden = !list.hidden;
+    head.classList.toggle("open", !list.hidden);
+    scrollDown();
+  };
+  box.append(head, list);
+  messagesEl.appendChild(box);
+  let n = 0;
+  const update = () => { head.textContent = `使用 ${n} 个工具`; };
+  update();
+  return {
+    add(tool) {
+      n++;
+      update();
+      const item = document.createElement("div");
+      item.className = "tool-item";
+      const nm = document.createElement("div");
+      nm.className = "tool-name";
+      nm.textContent = typeof tool === "string" ? tool : tool.name;
+      item.appendChild(nm);
+      const detail = typeof tool === "string" ? undefined : tool.detail;
+      if (detail) {
+        const d = document.createElement("div");
+        d.className = "tool-input";
+        d.textContent = detail;
+        item.appendChild(d);
+      }
+      list.appendChild(item);
+      scrollDown();
+    },
+  };
 }
 
 // —— “正在忙”指示 ——
@@ -153,7 +170,8 @@ function sendMessage() {
   inputEl.value = "";
   autoGrow();
   busy = true;
-  statusEl.classList.add("busy");
+  dotEl.classList.add("busy");
+  statusTextEl.textContent = "正在干活…";
   sendBtn.hidden = true;
   stopBtn.hidden = false;
   showTyping();
@@ -273,14 +291,11 @@ async function openSession(id) {
   const record = await api(`/api/sessions/${id}`);
   sessionId = record.id;
   localStorage.setItem("home_session", sessionId);
-  titleEl.textContent = record.title;
   messagesEl.innerHTML = "";
   for (const m of record.messages) {
     if (m.tools?.length) {
-      const tools = document.createElement("div");
-      tools.className = "tools";
-      for (const tool of m.tools) addToolChip(tools, tool);
-      messagesEl.appendChild(tools);
+      const tb = newToolbox();
+      for (const tool of m.tools) tb.add(tool);
     }
     if (m.text || m.attachments?.length) {
       if (m.role === "user") {
@@ -298,7 +313,6 @@ async function openSession(id) {
 $("newChat").onclick = () => {
   sessionId = null;
   localStorage.removeItem("home_session");
-  titleEl.textContent = "家";
   messagesEl.innerHTML = "";
   closeDrawer();
 };
