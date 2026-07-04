@@ -494,18 +494,20 @@ maskEl.onclick = closeDrawer;
 // —— 视图切换 ——
 const homeViewEl = $("homeView");
 const chatViewEl = $("chatView");
+const memoryViewEl = $("memoryView");
 const bottomNavEl = $("bottomNav");
 
 function showView(name) {
   homeViewEl.hidden = name !== "home";
   chatViewEl.hidden = name !== "chat";
-  // 聊天视图占满全屏，底部导航让位；其他视图导航常驻
-  bottomNavEl.hidden = name === "chat";
+  memoryViewEl.hidden = name !== "memory";
+  // 聊天和星图都要占满屏，底部导航让位；首页导航常驻
+  bottomNavEl.hidden = name === "chat" || name === "memory";
   for (const btn of bottomNavEl.querySelectorAll(".nav-btn")) {
     btn.classList.toggle("active", btn.dataset.view === name);
   }
-  // 回首页时看看要不要刷招呼语（内部有 30 分钟节流）
   if (name === "home") updateGreeting();
+  if (name === "memory") loadMemoryGraph();
 }
 
 for (const btn of bottomNavEl.querySelectorAll(".nav-btn")) {
@@ -521,10 +523,33 @@ for (const card of document.querySelectorAll("#homeView .card")) {
     if (card.disabled) return;
     const route = card.dataset.route;
     if (route === "chat") showView("chat");
+    else if (route === "memory") showView("memory");
   };
 }
 
 $("backHome").onclick = () => showView("home");
+$("memoryBack").onclick = () => showView("home");
+
+// —— 记忆星图 ——
+// I.1 只做数据加载和空态；I.2 加 canvas 渲染，I.3 加手势和详情
+let memoryGraph = null;
+async function loadMemoryGraph() {
+  try {
+    memoryGraph = await api("/api/memory/graph");
+    const n = memoryGraph.entities?.length || 0;
+    $("memoryMeta").textContent = n
+      ? `${n} 个星座 · ${memoryGraph.links.length} 条桥`
+      : "";
+    $("memoryEmpty").hidden = n > 0;
+    // I.2 会在这里调渲染
+    if (typeof renderStarmap === "function") renderStarmap();
+  } catch {
+    $("memoryEmpty").hidden = false;
+    $("memoryMeta").textContent = "";
+  }
+}
+
+$("detailClose").onclick = () => { $("memoryDetail").hidden = true; };
 
 // —— 首页时钟 / 招呼语 / 天数 ——
 // 领证日期在 CLAUDE.md 里：2025 平安夜

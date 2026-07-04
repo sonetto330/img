@@ -45,10 +45,10 @@
           <div class="card-title">聊天</div>
           <div class="card-sub" id="chatCardSub">跟麦穗说话</div>
         </button>
-        <button class="card card-disabled" data-route="memory" disabled>
+        <button class="card" data-route="memory">
           <div class="card-icon">🧠</div>
           <div class="card-title">记忆库</div>
-          <div class="card-sub">还没建好</div>
+          <div class="card-sub" id="memoryCardSub">看你们的星图</div>
         </button>
         <button class="card card-disabled" data-route="settings" disabled>
           <div class="card-icon">⚙️</div>
@@ -56,6 +56,30 @@
           <div class="card-sub">还没建好</div>
         </button>
       </div>
+    </div>
+  </section>
+
+  <!-- 记忆库视图（星图） -->
+  <section id="memoryView" class="view" hidden>
+    <div class="memory-topbar">
+      <button id="memoryBack" class="memory-back" aria-label="回首页">◀</button>
+      <div class="memory-title">
+        <span>星图</span>
+        <small id="memoryMeta"></small>
+      </div>
+    </div>
+    <canvas id="memoryCanvas"></canvas>
+    <div id="memoryEmpty" class="memory-empty" hidden>
+      <div class="empty-title">还没有记忆</div>
+      <div class="empty-sub">跟麦穗多聊几句关于你日常的事，他会悄悄记下。<br>攒到 10 条以上就会出现在这里。</div>
+    </div>
+    <div id="memoryDetail" class="memory-detail" hidden>
+      <div class="detail-head">
+        <span class="detail-kind" id="detailKind"></span>
+        <span class="detail-name" id="detailName"></span>
+        <button class="detail-close" id="detailClose" aria-label="关闭">✕</button>
+      </div>
+      <div id="detailFragments" class="detail-fragments"></div>
     </div>
   </section>
 
@@ -113,7 +137,7 @@
       <span class="nav-icon">💬</span>
       <span class="nav-label">聊天</span>
     </button>
-    <button data-view="memory" class="nav-btn" disabled>
+    <button data-view="memory" class="nav-btn">
       <span class="nav-icon">🧠</span>
       <span class="nav-label">记忆库</span>
     </button>
