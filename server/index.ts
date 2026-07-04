@@ -134,7 +134,11 @@ const server = http.createServer((req, res) => {
       res.writeHead(404);
       return res.end("not found");
     }
-    res.writeHead(200, { "Content-Type": MIME[path.extname(filePath)] || "application/octet-stream" });
+    res.writeHead(200, {
+      "Content-Type": MIME[path.extname(filePath)] || "application/octet-stream",
+      // 界面文件禁止缓存，更新后刷新一次就是最新的，不用清缓存
+      "Cache-Control": "no-cache",
+    });
     res.end(data);
   });
 });
