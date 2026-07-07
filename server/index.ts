@@ -373,6 +373,7 @@ wss.on("connection", (ws: WebSocket, req) => {
           persona: loadPersona(),
           modePrompt: loadModePrompt(record.mode),
           memoryBlock,
+          model: process.env.CLAUDE_MODEL || "claude-opus-4-7",
           mcpServers: built?.mcpServers,
           allowedTools: built?.allowedTools,
         },
