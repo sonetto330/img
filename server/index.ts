@@ -252,8 +252,11 @@ wss.on("connection", (ws: WebSocket, req) => {
     if (ws.readyState === ws.OPEN) ws.send(JSON.stringify(payload));
   };
 
+  // 前端传来的模型别名，只认这仨；不认识的当没传，走默认
+  const MODEL_ALIASES = new Set(["opus", "sonnet", "haiku"]);
+
   ws.on("message", (raw) => {
-    let msg: { type?: string; sessionId?: string; text?: string; mode?: string; attachments?: Attachment[] };
+    let msg: { type?: string; sessionId?: string; text?: string; mode?: string; attachments?: Attachment[]; model?: string };
     try {
       msg = JSON.parse(String(raw));
     } catch {
@@ -326,6 +329,9 @@ wss.on("connection", (ws: WebSocket, req) => {
 
     const text = msg.text?.trim() || "";
     if (msg.type !== "chat" || (!text && attachments.length === 0)) return;
+    const model = MODEL_ALIASES.has(msg.model || "")
+      ? msg.model!
+      : process.env.CLAUDE_MODEL || "claude-opus-4-7";
     if (active) return send({ type: "error", message: "上一条还在跑，等等或者先打断" });
 
     // 已有会话不改 mode；只有新建时才认 msg.mode，未指定就默认 chat
@@ -373,7 +379,7 @@ wss.on("connection", (ws: WebSocket, req) => {
           persona: loadPersona(),
           modePrompt: loadModePrompt(record.mode),
           memoryBlock,
-          model: process.env.CLAUDE_MODEL || "claude-opus-4-7",
+          model,
           mcpServers: built?.mcpServers,
           allowedTools: built?.allowedTools,
         },

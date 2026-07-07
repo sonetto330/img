@@ -235,7 +235,7 @@ function sendMessage() {
   sendBtn.hidden = true;
   stopBtn.hidden = false;
   showTyping();
-  ws.send(JSON.stringify({ type: "chat", sessionId, text, attachments }));
+  ws.send(JSON.stringify({ type: "chat", sessionId, text, attachments, model: modelSelect.value || undefined }));
   // 你刚发了消息，肯定想看到，无条件贴底
   forceScrollDown();
 }
@@ -337,6 +337,19 @@ function attachToBubble(bubble, att, before) {
   else bubble.appendChild(el);
   scrollDown();
 }
+
+// —— 模型切换：不选就用服务端默认，选了记在本机 ——
+const modelSelect = $("modelSelect");
+modelSelect.value = localStorage.getItem("home_model") || "";
+if (modelSelect.value !== (localStorage.getItem("home_model") || "")) {
+  // 存的值已经不在选项里（比如以后下架了），回落到默认
+  modelSelect.value = "";
+  localStorage.removeItem("home_model");
+}
+modelSelect.onchange = () => {
+  if (modelSelect.value) localStorage.setItem("home_model", modelSelect.value);
+  else localStorage.removeItem("home_model");
+};
 
 sendBtn.onclick = sendMessage;
 stopBtn.onclick = () => ws?.send(JSON.stringify({ type: "interrupt" }));
