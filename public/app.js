@@ -38,7 +38,10 @@ function handle(msg) {
       break;
     case "delta":
       hideTyping();
-      if (!liveBubble) liveBubble = addBubble("ta", "");
+      if (!liveBubble) {
+        maybeStamp();
+        liveBubble = addBubble("ta", "");
+      }
       liveBubble.textContent += msg.text;
       scrollDown();
       break;
@@ -52,6 +55,7 @@ function handle(msg) {
       let bubble = liveBubble;
       if (bubble) renderMd(bubble, msg.text || bubble.textContent);
       else if (msg.text) {
+        maybeStamp();
         bubble = addBubble("ta", "");
         renderMd(bubble, msg.text);
       }
@@ -144,6 +148,35 @@ function hideTyping() {
   typingEl = null;
 }
 
+// —— 时间戳：两条消息隔了 10 分钟以上，中间插一行居中小字 ——
+const STAMP_GAP = 10 * 60 * 1000;
+let lastStampTime = 0;
+
+function fmtStamp(d) {
+  const now = new Date();
+  const hhmm = `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+  if (d.toDateString() === now.toDateString()) return hhmm;
+  const yest = new Date(now);
+  yest.setDate(now.getDate() - 1);
+  if (d.toDateString() === yest.toDateString()) return `昨天 ${hhmm}`;
+  const md = `${d.getMonth() + 1}月${d.getDate()}日`;
+  if (d.getFullYear() === now.getFullYear()) return `${md} ${hhmm}`;
+  return `${d.getFullYear()}年${md} ${hhmm}`;
+}
+
+// at 不传就是"现在"（正在发生的消息）；历史消息传存下来的时间
+function maybeStamp(at) {
+  const t = at ? new Date(at).getTime() : Date.now();
+  if (!Number.isFinite(t)) return;
+  if (t - lastStampTime >= STAMP_GAP) {
+    const div = document.createElement("div");
+    div.className = "msg stamp";
+    div.textContent = fmtStamp(new Date(t));
+    messagesEl.appendChild(div);
+  }
+  lastStampTime = t;
+}
+
 // —— 界面 ——
 function addBubble(kind, text) {
   const div = document.createElement("div");
@@ -189,6 +222,7 @@ function sendMessage() {
   if ((!text && ready.length === 0) || busy || !ws || ws.readyState !== 1) return;
   if (pending.some((p) => p.uploading)) return addBubble("error", "附件还在上传，稍等一下");
   const attachments = ready.map(({ _thumb, ...att }) => att);
+  maybeStamp();
   const bubble = addBubble("me", text);
   // attachToBubble 的 before 是插最前面，倒着喂才能保持选择顺序
   for (const att of [...ready].reverse()) attachToBubble(bubble, att, true);
@@ -317,6 +351,7 @@ function patNote() {
 }
 function sendPat() {
   if (busy || !ws || ws.readyState !== 1) return;
+  maybeStamp();
   patNote();
   busy = true;
   dotEl.classList.add("busy");
@@ -470,12 +505,14 @@ async function doDelete(sess) {
     sessionId = null;
     localStorage.removeItem("home_session");
     messagesEl.innerHTML = "";
+    lastStampTime = 0;
   }
   loadSessions();
 }
 
 // 一条消息的渲染逻辑，openSession 和"查看更早"复用同一份
 function renderMessage(m) {
+  if (m.at) maybeStamp(m.at);
   if (m.tools?.length) {
     const tb = newToolbox();
     for (const tool of m.tools) tb.add(tool);
@@ -524,7 +561,12 @@ function loadOlder() {
   messagesEl.innerHTML = "";
   // 还有更早的 → 顶部继续放按钮
   if (pendingOlderMessages.length > 0) addLoadOlderButton();
+  // 时间戳基准从头算（这段更早），渲染完恢复到原来的（最新消息的时间），
+  // 不然下一条新消息会拿"更早那段"当基准，多插一行也可能少插一行
+  const savedStampTime = lastStampTime;
+  lastStampTime = 0;
   for (const m of chunk) renderMessage(m);
+  lastStampTime = savedStampTime;
   for (const node of saved) messagesEl.appendChild(node);
 
   // 视野不跳：把 scrollTop 加上新增内容的高度差
@@ -538,6 +580,7 @@ async function openSession(id) {
   localStorage.setItem("home_session", sessionId);
   messagesEl.innerHTML = "";
   pendingOlderMessages = null;
+  lastStampTime = 0;
 
   const all = record.messages;
   if (all.length > CHAT_CHUNK) {
@@ -558,6 +601,7 @@ $("newChat").onclick = () => {
   localStorage.removeItem("home_session");
   messagesEl.innerHTML = "";
   pendingOlderMessages = null;
+  lastStampTime = 0;
   closeDrawer();
 };
 

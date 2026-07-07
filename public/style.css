@@ -83,6 +83,11 @@ header button#backHome { font-size: 18px; }
 }
 .msg.error { align-self: center; background: #fbe9e4; color: #a33f22; font-size: 13px; border-radius: 10px; }
 .msg.pat { align-self: center; background: none; color: var(--muted); font-size: 12px; padding: 4px 12px; }
+.msg.stamp {
+  align-self: center; background: none; color: var(--muted);
+  font-size: 11px; padding: 2px 12px; letter-spacing: .4px;
+  user-select: none; -webkit-user-select: none;
+}
 
 /* Markdown 渲染后的气泡 */
 .msg.md { white-space: normal; }
