@@ -42,22 +42,18 @@ header button#backHome {
   border: none; background: none; font-size: 20px; cursor: pointer; color: var(--ink); padding: 4px;
 }
 header button#backHome { font-size: 18px; }
-.who { display: flex; align-items: center; gap: 10px; flex: 1; }
-.avatar {
-  position: relative; width: 38px; height: 38px; border-radius: 50%;
-  background: linear-gradient(135deg, #e0824f, var(--accent));
-  display: grid; place-items: center; font-size: 19px;
+.who {
+  display: flex; align-items: center; gap: 10px; flex: 1;
   cursor: pointer; user-select: none; -webkit-user-select: none;
   touch-action: manipulation; /* iOS 别拿双击去缩放 */
 }
-.avatar i {
-  position: absolute; right: -1px; bottom: -1px;
-  width: 11px; height: 11px; border-radius: 50%;
-  background: var(--online); border: 2px solid var(--panel);
-}
-.avatar i.busy { background: var(--accent); animation: pulse 1s infinite alternate; }
-@keyframes pulse { from { transform: scale(.85); } to { transform: scale(1.15); } }
 .who-text h1 { font-size: 16px; font-weight: 700; line-height: 1.2; }
+.who-text h1 i {
+  display: inline-block; width: 9px; height: 9px; border-radius: 50%;
+  background: var(--online); margin-left: 7px; vertical-align: 1px;
+}
+.who-text h1 i.busy { background: var(--accent); animation: pulse 1s infinite alternate; }
+@keyframes pulse { from { transform: scale(.85); } to { transform: scale(1.15); } }
 .who-text small { font-size: 11px; color: var(--muted); }
 
 /* —— 消息区 —— */

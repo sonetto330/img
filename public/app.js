@@ -362,7 +362,7 @@ function sendPat() {
   ws.send(JSON.stringify({ type: "pat", sessionId }));
   forceScrollDown();
 }
-document.querySelector(".avatar").addEventListener("dblclick", sendPat);
+document.querySelector(".who").addEventListener("dblclick", sendPat);
 
 // TTS 逐条气泡念文字的按钮已经拆掉；语音留给以后的"通话"模块专门用。
 // 后端 /api/tts 保留，server/tts.ts 保留。
