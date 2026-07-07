@@ -161,17 +161,30 @@ header button#backHome { font-size: 18px; }
 .typing span:nth-child(3) { animation-delay: .4s; }
 @keyframes blink { 0%, 60%, 100% { opacity: .25; } 30% { opacity: .9; } }
 
-/* —— 待发送预览条 —— */
+/* —— 待发送预览条（可多个附件横排，超出横滑）—— */
 .pending[hidden] { display: none; }
 .pending {
   display: flex; align-items: center; gap: 8px;
   padding: 8px max(14px, calc((100% - 760px) / 2));
   background: var(--panel); border-top: 1px solid var(--line);
-  font-size: 13px; color: var(--muted);
+  overflow-x: auto;
 }
-.pending img { width: 44px; height: 44px; object-fit: cover; border-radius: 8px; }
-.pending span { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.pending button { border: none; background: none; color: var(--muted); font-size: 15px; cursor: pointer; }
+.pending-chip {
+  flex: none; display: flex; align-items: center; gap: 6px;
+  max-width: 210px;
+  background: var(--bg); border: 1px solid var(--line);
+  border-radius: 10px; padding: 5px 8px;
+  font-size: 12.5px; color: var(--ink);
+}
+.pending-chip.uploading { color: var(--muted); font-style: italic; }
+.pending-chip img { width: 34px; height: 34px; object-fit: cover; border-radius: 6px; }
+.pending-chip .chip-icon { font-size: 17px; line-height: 1; }
+.pending-chip .chip-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pending-chip .chip-remove {
+  border: none; background: none; color: var(--muted);
+  font-size: 13px; cursor: pointer; padding: 2px 3px; flex: none;
+}
+.pending-chip .chip-remove:hover { color: var(--accent); }
 
 /* —— 底部输入区 —— */
 footer {
@@ -181,9 +194,15 @@ footer {
   background: var(--panel); border-top: 1px solid var(--line);
 }
 footer .attach {
-  border: none; background: none; color: var(--muted);
-  font-size: 21px; line-height: 1; padding: 8px 3px; cursor: pointer;
+  width: 41px; height: 41px; flex: none;
+  border: 1px solid var(--line); border-radius: 50%;
+  background: var(--panel); color: var(--muted);
+  font-size: 20px; line-height: 1; cursor: pointer;
+  display: grid; place-items: center;
+  transition: color .15s, border-color .15s;
+  touch-action: manipulation;
 }
+footer .attach:hover, footer .attach:active { color: var(--accent); border-color: var(--accent-soft); }
 footer textarea {
   flex: 1; resize: none; border: 1px solid var(--line); border-radius: 21px;
   padding: 10px 15px; font: inherit; font-size: 15px; background: #fff;

@@ -110,17 +110,11 @@
 
       <div id="messages" class="messages"></div>
 
-      <div id="pendingBar" class="pending" hidden>
-        <img id="pendingThumb" alt="" hidden />
-        <span id="pendingName"></span>
-        <button id="pendingRemove">✕</button>
-      </div>
+      <div id="pendingBar" class="pending" hidden></div>
 
       <footer>
-        <button id="imgBtn" class="attach" aria-label="发图片">🖼</button>
-        <button id="fileBtn" class="attach" aria-label="发文件">＋</button>
-        <input id="imgInput" type="file" accept="image/*" hidden />
-        <input id="fileInput" type="file" hidden />
+        <button id="attachBtn" class="attach" aria-label="加附件">＋</button>
+        <input id="fileInput" type="file" multiple hidden />
         <textarea id="input" rows="1" placeholder="说点什么…"></textarea>
         <button id="sendBtn" aria-label="发送">➤</button>
         <button id="stopBtn" aria-label="打断" hidden>■</button>

@@ -185,10 +185,13 @@ function renderMd(el, text) {
 
 function sendMessage() {
   const text = inputEl.value.trim();
-  if ((!text && !pending) || busy || !ws || ws.readyState !== 1) return;
-  const attachments = pending ? [pending] : [];
+  const ready = pending.filter((p) => !p.uploading);
+  if ((!text && ready.length === 0) || busy || !ws || ws.readyState !== 1) return;
+  if (pending.some((p) => p.uploading)) return addBubble("error", "附件还在上传，稍等一下");
+  const attachments = ready.map(({ _thumb, ...att }) => att);
   const bubble = addBubble("me", text);
-  if (pending) attachToBubble(bubble, pending, true);
+  // attachToBubble 的 before 是插最前面，倒着喂才能保持选择顺序
+  for (const att of [...ready].reverse()) attachToBubble(bubble, att, true);
   clearPending();
   inputEl.value = "";
   autoGrow();
@@ -203,55 +206,84 @@ function sendMessage() {
   forceScrollDown();
 }
 
-// —— 附件 ——
-const imgInput = $("imgInput");
+// —— 附件（可多个）——
 const fileInput = $("fileInput");
 const pendingBar = $("pendingBar");
-const pendingThumb = $("pendingThumb");
-const pendingName = $("pendingName");
-let pending = null; // { file, name, kind }
+let pending = []; // [{ file, name, kind, _thumb }]
 
-$("imgBtn").onclick = () => imgInput.click();   // 手机上直接弹相册/拍照
-$("fileBtn").onclick = () => fileInput.click(); // 选任意文件
+$("attachBtn").onclick = () => fileInput.click(); // 手机上会弹相册/拍照/文件三选一
+fileInput.onchange = () => pickFiles(fileInput);
 
-imgInput.onchange = () => pickFile(imgInput);
-fileInput.onchange = () => pickFile(fileInput);
-
-async function pickFile(input) {
-  const f = input.files[0];
+async function pickFiles(input) {
+  const files = Array.from(input.files);
   input.value = "";
-  if (!f) return;
-  if (f.size > 30 * 1024 * 1024) return addBubble("error", "文件太大，上限 30MB");
-  pendingName.textContent = "上传中…";
-  pendingBar.hidden = false;
-  try {
-    const res = await fetch(`/api/upload?token=${encodeURIComponent(token)}&name=${encodeURIComponent(f.name)}`, {
-      method: "POST",
-      body: f,
-    });
-    if (!res.ok) throw new Error((await res.json()).error || "上传失败");
-    pending = await res.json();
-    pendingName.textContent = pending.name;
-    if (pending.kind === "image") {
-      pendingThumb.src = URL.createObjectURL(f);
-      pendingThumb.hidden = false;
-    } else {
-      pendingThumb.hidden = true;
+  for (const f of files) {
+    if (f.size > 30 * 1024 * 1024) {
+      addBubble("error", `「${f.name}」太大，上限 30MB`);
+      continue;
     }
-  } catch (e) {
-    clearPending();
-    addBubble("error", `上传失败：${e.message}`);
+    // 先占位显示"上传中"，传完原地替换
+    const chip = { name: f.name, uploading: true };
+    pending.push(chip);
+    renderPending();
+    try {
+      const res = await fetch(`/api/upload?token=${encodeURIComponent(token)}&name=${encodeURIComponent(f.name)}`, {
+        method: "POST",
+        body: f,
+      });
+      if (!res.ok) throw new Error((await res.json()).error || "上传失败");
+      const att = await res.json();
+      if (att.kind === "image") att._thumb = URL.createObjectURL(f);
+      pending[pending.indexOf(chip)] = att;
+    } catch (e) {
+      pending = pending.filter((p) => p !== chip);
+      addBubble("error", `「${f.name}」上传失败：${e.message}`);
+    }
+    renderPending();
   }
 }
 
-$("pendingRemove").onclick = clearPending;
+function renderPending() {
+  pendingBar.innerHTML = "";
+  pendingBar.hidden = pending.length === 0;
+  for (const att of pending) {
+    const chip = document.createElement("div");
+    chip.className = "pending-chip";
+    if (att.uploading) {
+      chip.classList.add("uploading");
+      chip.textContent = `${att.name} 上传中…`;
+    } else {
+      if (att._thumb) {
+        const img = document.createElement("img");
+        img.src = att._thumb;
+        chip.appendChild(img);
+      } else {
+        const icon = document.createElement("span");
+        icon.className = "chip-icon";
+        icon.textContent = "📄";
+        chip.appendChild(icon);
+      }
+      const name = document.createElement("span");
+      name.className = "chip-name";
+      name.textContent = att.name;
+      chip.appendChild(name);
+      const rm = document.createElement("button");
+      rm.className = "chip-remove";
+      rm.textContent = "✕";
+      rm.setAttribute("aria-label", `移除 ${att.name}`);
+      rm.onclick = () => {
+        pending = pending.filter((p) => p !== att);
+        renderPending();
+      };
+      chip.appendChild(rm);
+    }
+    pendingBar.appendChild(chip);
+  }
+}
 
 function clearPending() {
-  pending = null;
-  pendingBar.hidden = true;
-  pendingThumb.hidden = true;
-  pendingThumb.src = "";
-  pendingName.textContent = "";
+  pending = [];
+  renderPending();
 }
 
 // 把附件塞进气泡里显示（图片显示图，文件显示名字）
