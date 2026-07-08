@@ -18,6 +18,7 @@ import { formatMemoryBlock } from "./memory/format.js";
 import { getGraph, getEntityDetail, getCoreDetail } from "./memory/graph.js";
 import { loadPersona } from "./persona.js";
 import { getGreeting } from "./greeting.js";
+import { translateThinking } from "./translate.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const root = path.join(here, "..");
@@ -58,6 +59,14 @@ const MIME: Record<string, string> = {
 
 function authed(url: URL): boolean {
   return url.searchParams.get("token") === TOKEN;
+}
+
+/** 当前时间的人话版，注入每轮系统提示 */
+function nowString(): string {
+  const d = new Date();
+  const wd = ["周日", "周一", "周二", "周三", "周四", "周五", "周六"][d.getDay()];
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}年${d.getMonth() + 1}月${d.getDate()}日 ${wd} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
 function sendJson(res: http.ServerResponse, status: number, body: unknown): void {
@@ -132,6 +141,30 @@ const server = http.createServer((req, res) => {
       } catch (err) {
         console.error(`[tts] ${err instanceof Error ? err.message : String(err)}`);
         sendJson(res, 502, { error: err instanceof Error ? err.message : "TTS 失败" });
+      }
+    });
+    return;
+  }
+
+  // 翻译思考内容（需要口令）
+  if (url.pathname === "/api/translate" && req.method === "POST") {
+    if (!authed(url)) return sendJson(res, 401, { error: "口令不对" });
+    const chunks: Buffer[] = [];
+    req.on("data", (c: Buffer) => chunks.push(c));
+    req.on("end", async () => {
+      let body: { text?: string };
+      try {
+        body = JSON.parse(Buffer.concat(chunks).toString("utf8") || "{}");
+      } catch {
+        return sendJson(res, 400, { error: "消息格式不对" });
+      }
+      const text = String(body.text || "").trim();
+      if (!text) return sendJson(res, 400, { error: "没有可翻的内容" });
+      try {
+        sendJson(res, 200, { text: await translateThinking(text) });
+      } catch (err) {
+        console.error(`[translate] ${err instanceof Error ? err.message : String(err)}`);
+        sendJson(res, 502, { error: "翻译失败，稍后再试" });
       }
     });
     return;
@@ -288,6 +321,7 @@ wss.on("connection", (ws: WebSocket, req) => {
           modePrompt: loadModePrompt(record.mode),
           model: process.env.CLAUDE_MODEL || "claude-opus-4-7",
           maxTurns: 1,
+          now: nowString(),
         },
         {
           onClaudeSession(claudeSessionId) {
@@ -382,6 +416,9 @@ wss.on("connection", (ws: WebSocket, req) => {
           model,
           mcpServers: built?.mcpServers,
           allowedTools: built?.allowedTools,
+          // 开自适应思考：闲聊模型基本不想，干活才想，想了前端就有卡片看
+          thinking: process.env.THINKING !== "off",
+          now: nowString(),
         },
         {
           onClaudeSession(claudeSessionId) {
@@ -392,12 +429,18 @@ wss.on("connection", (ws: WebSocket, req) => {
           onDelta(text) {
             send({ type: "delta", text });
           },
+          onThinkingDelta(text) {
+            send({ type: "thinking", text });
+          },
+          onThinkingPause(ms) {
+            send({ type: "thinking_done", ms });
+          },
           onTool(tool) {
             send({ type: "tool", name: tool.name, detail: tool.detail });
           },
-          onDone(finalText, tools) {
+          onDone(finalText, tools, thinking) {
             active = null;
-            record.messages.push({ role: "assistant", text: finalText, tools, at: new Date().toISOString() });
+            record.messages.push({ role: "assistant", text: finalText, tools, thinking, at: new Date().toISOString() });
             store.save(record);
             send({ type: "done", text: finalText });
             if (!anyoneWatching()) barkPush("麦穗", finalText).catch(() => {});

@@ -53,6 +53,7 @@ header button#backHome { font-size: 18px; }
   background: var(--online); margin-left: 7px; vertical-align: 1px;
 }
 .who-text h1 i.busy { background: var(--accent); animation: pulse 1s infinite alternate; }
+.who-text h1 i.off { background: #b6aca0; animation: none; }
 @keyframes pulse { from { transform: scale(.85); } to { transform: scale(1.15); } }
 .who-text small { font-size: 11px; color: var(--muted); }
 #modelSelect {
@@ -133,32 +134,82 @@ header button#backHome { font-size: 18px; }
   border-color: var(--accent-soft);
 }
 
-/* —— 工具折叠盒 —— */
-.toolbox { align-self: flex-start; max-width: 84%; }
-.toolbox-head {
-  font-size: 12px; color: var(--muted); background: var(--panel);
-  border: 1px solid var(--line); border-radius: 999px; padding: 5px 13px; cursor: pointer;
+/* —— 思考卡片 —— */
+.thinking { align-self: flex-start; max-width: 84%; width: 100%; }
+.thinking-head {
+  width: 100%; text-align: left;
+  display: flex; align-items: center; gap: 8px;
+  font: inherit; font-size: 12.5px; color: var(--muted);
+  background: var(--panel); border: 1px solid var(--line);
+  border-radius: 14px; padding: 9px 14px; cursor: pointer;
+  touch-action: manipulation;
 }
-.toolbox-head::after { content: " ∨"; color: var(--accent); }
-.toolbox-head.open::after { content: " ∧"; }
-.toolbox-list {
-  margin-top: 6px; background: var(--panel); border: 1px solid var(--line);
-  border-radius: 12px; padding: 9px 12px;
-  display: flex; flex-wrap: wrap; gap: 6px; align-items: flex-start;
+.thinking-head::before { content: "✦"; color: var(--accent); font-size: 11px; }
+.thinking-head::after { content: "›"; margin-left: auto; color: var(--muted); transition: transform .15s; }
+.thinking-head.open::after { transform: rotate(90deg); }
+.thinking.live .thinking-head::before { animation: pulse 1s infinite alternate; display: inline-block; }
+.thinking-body {
+  margin-top: 6px;
+  background: var(--panel); border: 1px solid var(--line); border-radius: 12px;
+  padding: 10px 13px;
+  font-size: 12.5px; color: var(--muted); line-height: 1.65;
+  white-space: pre-wrap; word-break: break-word;
+  max-height: 260px; overflow-y: auto;
 }
-.toolbox-list[hidden] { display: none; }
-/* 没有详情的工具：小标签横排，不占整行 */
-.tool-item {
-  font-size: 12px; color: var(--muted);
-  border: 1px dashed var(--line); border-radius: 999px; padding: 3px 10px;
+.thinking-body[hidden] { display: none; }
+.thinking-tx {
+  flex: none; margin-left: 6px;
+  font: inherit; font-size: 11px; color: var(--muted);
+  border: 1px solid var(--line); border-radius: 999px;
+  background: var(--bg); padding: 1px 9px; cursor: pointer;
+  touch-action: manipulation;
 }
-.tool-item .tool-name { display: inline; font-weight: 600; color: var(--ink); }
-.tool-item .tool-name::before { content: "🔧 "; }
-/* 有详情的工具：占一整行，下面跟命令/文件 */
-.tool-item.wide { flex-basis: 100%; border: none; border-radius: 0; padding: 0; }
-.tool-item .tool-input {
-  font-size: 11.5px; color: var(--muted); white-space: pre-wrap; word-break: break-all; margin-top: 2px;
+.thinking-tx:hover, .thinking-tx:active { color: var(--accent); border-color: var(--accent-soft); }
+
+/* —— 工具卡片（总头一条，点开一步一张卡） —— */
+.steps {
+  align-self: flex-start; max-width: 84%; width: 100%;
+  display: flex; flex-direction: column; gap: 6px;
 }
+.steps-head {
+  width: 100%; text-align: left;
+  display: flex; align-items: center; gap: 8px;
+  font: inherit; font-size: 12.5px; color: var(--muted);
+  background: var(--panel); border: 1px solid var(--line);
+  border-radius: 14px; padding: 9px 14px; cursor: pointer;
+  touch-action: manipulation;
+}
+.steps-count { flex: none; font-weight: 600; color: var(--ink); }
+.steps-head::after { content: "›"; color: var(--muted); margin-left: auto; transition: transform .15s; }
+.steps-head.open::after { transform: rotate(90deg); }
+.steps-list { display: flex; flex-direction: column; gap: 6px; }
+.steps-list[hidden] { display: none; }
+.step-head {
+  width: 100%; text-align: left;
+  display: flex; align-items: center; gap: 8px;
+  font: inherit; font-size: 12.5px; color: var(--ink);
+  background: var(--panel); border: 1px solid var(--line);
+  border-radius: 14px; padding: 9px 14px;
+  touch-action: manipulation;
+}
+.step-icon { font-size: 13px; line-height: 1; }
+.step-name { font-weight: 600; flex: none; }
+.step-brief {
+  color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  flex: 1; min-width: 0;
+}
+.step-head.has-body { cursor: pointer; }
+.step-head.has-body::after { content: "›"; color: var(--muted); margin-left: auto; transition: transform .15s; }
+.step-head.has-body.open::after { transform: rotate(90deg); }
+.step-body {
+  margin-top: 4px;
+  background: var(--panel); border: 1px solid var(--line); border-radius: 12px;
+  padding: 9px 12px;
+  font-size: 12px; color: var(--muted); line-height: 1.6;
+  white-space: pre-wrap; word-break: break-all;
+  max-height: 200px; overflow-y: auto;
+}
+.step-body[hidden] { display: none; }
 
 /* —— 正在忙 —— */
 .typing { align-self: flex-start; display: flex; gap: 4px; padding: 12px 14px; }

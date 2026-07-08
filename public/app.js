@@ -22,12 +22,23 @@ let sessionId = localStorage.getItem("home_session") || null;
 let busy = false;
 let liveBubble = null; // 正在流式输出的气泡
 let liveTools = null;
+let liveThinking = null; // 正在流式输出的思考卡片
 
 // —— WebSocket ——
 function connect() {
+  statusTextEl.textContent = "连接中…";
+  dotEl.classList.add("off");
   ws = new WebSocket(`${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/ws?token=${encodeURIComponent(token)}`);
+  ws.onopen = () => {
+    dotEl.classList.remove("off");
+    if (!busy) statusTextEl.textContent = "在线";
+  };
   ws.onmessage = (e) => handle(JSON.parse(e.data));
-  ws.onclose = () => setTimeout(connect, 1500);
+  ws.onclose = () => {
+    dotEl.classList.add("off");
+    if (!busy) statusTextEl.textContent = "已断线，重连中…";
+    setTimeout(connect, 1500);
+  };
 }
 
 function handle(msg) {
@@ -35,6 +46,17 @@ function handle(msg) {
     case "session":
       sessionId = msg.sessionId;
       localStorage.setItem("home_session", sessionId);
+      break;
+    case "thinking":
+      hideTyping();
+      if (!liveThinking) {
+        maybeStamp();
+        liveThinking = newThinkingCard();
+      }
+      liveThinking.append(msg.text);
+      break;
+    case "thinking_done":
+      liveThinking?.finish(msg.ms);
       break;
     case "delta":
       hideTyping();
@@ -82,6 +104,7 @@ function finishTurn() {
   busy = false;
   liveBubble = null;
   liveTools = null;
+  liveThinking = null;
   hideTyping();
   dotEl.classList.remove("busy");
   statusTextEl.textContent = "在线";
@@ -90,14 +113,113 @@ function finishTurn() {
   scrollDown();
 }
 
-// —— 工具折叠盒（“使用 N 个工具”，点开看每一步） ——
+// —— 思考卡片（"思考了 X.Xs"，点开看他想了什么） ——
+function newThinkingCard(saved) {
+  const box = document.createElement("div");
+  box.className = "thinking";
+  const head = document.createElement("button");
+  head.className = "thinking-head";
+  const label = document.createElement("span");
+  label.className = "thinking-label";
+  label.textContent = "思考中…";
+  head.appendChild(label);
+  const body = document.createElement("div");
+  body.className = "thinking-body";
+  body.hidden = true;
+  head.onclick = () => {
+    body.hidden = !body.hidden;
+    head.classList.toggle("open", !body.hidden);
+    scrollDown();
+  };
+  box.append(head, body);
+  messagesEl.appendChild(box);
+
+  // 翻译按钮：思考多为英文，点一下翻中文，再点切回原文
+  let original = null; // 非 null 表示当前显示的是译文
+  let translated = null;
+  const tx = document.createElement("button");
+  tx.className = "thinking-tx";
+  tx.textContent = "译";
+  tx.onclick = async (e) => {
+    e.stopPropagation(); // 别顺手把卡片折叠了
+    if (original !== null) {
+      body.textContent = original;
+      original = null;
+      tx.textContent = "译";
+      return;
+    }
+    if (!translated) {
+      tx.textContent = "…";
+      try {
+        const res = await fetch(`/api/translate?token=${encodeURIComponent(token)}`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ text: body.textContent }),
+        });
+        if (!res.ok) throw new Error((await res.json()).error || "翻译失败");
+        translated = (await res.json()).text;
+      } catch (err) {
+        tx.textContent = "译";
+        return addBubble("error", err.message);
+      }
+    }
+    original = body.textContent;
+    body.textContent = translated;
+    tx.textContent = "原";
+    body.hidden = false;
+    head.classList.add("open");
+  };
+
+  const card = {
+    el: box,
+    append(text) {
+      box.classList.add("live");
+      body.textContent += text;
+      scrollDown();
+    },
+    finish(ms) {
+      box.classList.remove("live");
+      label.textContent = `思考了 ${(ms / 1000).toFixed(1)}s`;
+      if (body.textContent && !tx.isConnected) head.appendChild(tx);
+    },
+  };
+  if (saved) {
+    body.textContent = saved.text;
+    card.finish(saved.ms);
+  }
+  return card;
+}
+
+// —— 工具卡片（一步一张卡，点开看细节） ——
+const TOOL_ICONS = [
+  ["read", "📄"], ["glob", "🗂"], ["grep", "🔍"], ["search", "🌐"], ["fetch", "🌐"],
+  ["edit", "✏️"], ["write", "📝"], ["bash", "💻"], ["task", "🤖"], ["agent", "🤖"],
+  ["todo", "📋"], ["notebook", "📓"],
+];
+function toolIcon(name) {
+  const n = name.toLowerCase();
+  for (const [key, icon] of TOOL_ICONS) if (n.includes(key)) return icon;
+  return "🔧";
+}
+// mcp__ombre__hold 这类内部名字太丑，剥掉外皮只留人能看的部分
+function toolLabel(name) {
+  const m = name.match(/^mcp__(.+?)__(.+)$/);
+  return m ? `${m[2]} · ${m[1]}` : name;
+}
+
 function newToolbox() {
   const box = document.createElement("div");
-  box.className = "toolbox";
+  box.className = "steps";
+  // 总开关：默认收起，头上滚动显示步数和当前动作，点开才展开一步步的卡片
   const head = document.createElement("button");
-  head.className = "toolbox-head";
+  head.className = "steps-head";
+  const count = document.createElement("span");
+  count.className = "steps-count";
+  const brief = document.createElement("span");
+  brief.className = "step-brief";
+  head.append(count, brief);
   const list = document.createElement("div");
-  list.className = "toolbox-list";
+  list.className = "steps-list";
   list.hidden = true;
   head.onclick = () => {
     list.hidden = !list.hidden;
@@ -107,27 +229,44 @@ function newToolbox() {
   box.append(head, list);
   messagesEl.appendChild(box);
   let n = 0;
-  const update = () => { head.textContent = `使用 ${n} 个工具`; };
-  update();
   return {
     add(tool) {
       n++;
-      update();
-      const item = document.createElement("div");
-      item.className = "tool-item";
-      const nm = document.createElement("div");
-      nm.className = "tool-name";
-      nm.textContent = typeof tool === "string" ? tool : tool.name;
-      item.appendChild(nm);
+      count.textContent = `🛠 ${n} 步操作`;
+      brief.textContent = toolLabel(typeof tool === "string" ? tool : tool.name);
+      const name = typeof tool === "string" ? tool : tool.name;
       const detail = typeof tool === "string" ? undefined : tool.detail;
+      const row = document.createElement("div");
+      row.className = "step";
+      const rowHead = document.createElement("button");
+      rowHead.className = "step-head";
+      const icon = document.createElement("span");
+      icon.className = "step-icon";
+      icon.textContent = toolIcon(name);
+      const nm = document.createElement("span");
+      nm.className = "step-name";
+      nm.textContent = toolLabel(name);
+      rowHead.append(icon, nm);
+      row.appendChild(rowHead);
       if (detail) {
-        item.classList.add("wide");
-        const d = document.createElement("div");
-        d.className = "tool-input";
-        d.textContent = detail;
-        item.appendChild(d);
+        const rowBrief = document.createElement("span");
+        rowBrief.className = "step-brief";
+        const firstLine = detail.split("\n")[0];
+        rowBrief.textContent = firstLine.length > 46 ? firstLine.slice(0, 46) + "…" : firstLine;
+        rowHead.appendChild(rowBrief);
+        const body = document.createElement("div");
+        body.className = "step-body";
+        body.textContent = detail;
+        body.hidden = true;
+        row.appendChild(body);
+        rowHead.classList.add("has-body");
+        rowHead.onclick = () => {
+          body.hidden = !body.hidden;
+          rowHead.classList.toggle("open", !body.hidden);
+          scrollDown();
+        };
       }
-      list.appendChild(item);
+      list.appendChild(row);
       scrollDown();
     },
   };
@@ -526,6 +665,7 @@ async function doDelete(sess) {
 // 一条消息的渲染逻辑，openSession 和"查看更早"复用同一份
 function renderMessage(m) {
   if (m.at) maybeStamp(m.at);
+  if (m.thinking?.text) newThinkingCard(m.thinking);
   if (m.tools?.length) {
     const tb = newToolbox();
     for (const tool of m.tools) tb.add(tool);

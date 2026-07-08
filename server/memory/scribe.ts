@@ -104,7 +104,7 @@ ${existingList}
     prompt: `分析这段对话，提取碎片：\n\n${convo}`,
     options: {
       cwd: root,
-      model: "claude-haiku-4-5",
+      model: "claude-haiku-4-5-20251001",
       permissionMode: "bypassPermissions",
       allowedTools: [],
       maxTurns: 1,

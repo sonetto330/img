@@ -5,11 +5,21 @@ export interface ToolCall {
   detail?: string;
 }
 
+export interface Thinking {
+  text: string;
+  /** 思考总耗时（毫秒），按流式分段计时累加 */
+  ms: number;
+}
+
 export interface TurnCallbacks {
   onClaudeSession(claudeSessionId: string): void;
   onDelta(text: string): void;
+  /** 思考过程的流式增量；不订阅就当没有 */
+  onThinkingDelta?(text: string): void;
+  /** 一段思考结束（可能有多段，ms 是累计值） */
+  onThinkingPause?(ms: number): void;
   onTool(tool: ToolCall): void;
-  onDone(finalText: string, tools: ToolCall[]): void;
+  onDone(finalText: string, tools: ToolCall[], thinking?: Thinking): void;
   onError(message: string): void;
 }
 
@@ -36,11 +46,18 @@ export interface TurnOptions {
   model?: string;
   /** 单轮里最多几步；拍一拍这类"不动工具"的场景传 1 */
   maxTurns?: number;
+  /** 是否开思考；开了模型自己决定想多少（adaptive） */
+  thinking?: boolean;
+  /** 当前时间的人话字符串，注入系统提示，让他知道现在几点 */
+  now?: string;
 }
 
 export function runTurn(opts: TurnOptions, cb: TurnCallbacks): TurnHandle {
   // 组装系统提示 append 层：人设 → 模式提示词 → 记忆碎片，缺哪层就跳哪层
   const appendParts: string[] = [];
+  if (opts.now) {
+    appendParts.push(`现在的时间：${opts.now}。你没有别的报时渠道，说到时间以这个为准。`);
+  }
   if (opts.persona) {
     appendParts.push(`以下是你的身份设定，任何时候都遵守：\n\n${opts.persona}`);
   }
@@ -61,6 +78,8 @@ export function runTurn(opts: TurnOptions, cb: TurnCallbacks): TurnHandle {
       includePartialMessages: true,
       model: opts.model,
       maxTurns: opts.maxTurns,
+      // display 必须给：不给的话思考内容不外发，前端什么都收不到（实测）
+      thinking: opts.thinking ? { type: "adaptive", display: "summarized" } : undefined,
       mcpServers: opts.mcpServers,
       allowedTools: opts.allowedTools,
       systemPrompt: {
@@ -75,6 +94,18 @@ export function runTurn(opts: TurnOptions, cb: TurnCallbacks): TurnHandle {
 
   const textParts: string[] = [];
   const tools: ToolCall[] = [];
+  // 思考过程：正文流出来之前模型在想什么。分段计时，段与段之间累加
+  const thinkingParts: string[] = [];
+  let thinkingMs = 0;
+  let thinkingStartedAt = 0; // 0 = 当前没有进行中的思考段
+
+  const closeThinkingSpan = () => {
+    if (thinkingStartedAt) {
+      thinkingMs += Date.now() - thinkingStartedAt;
+      thinkingStartedAt = 0;
+      cb.onThinkingPause?.(thinkingMs);
+    }
+  };
 
   (async () => {
     try {
@@ -86,7 +117,14 @@ export function runTurn(opts: TurnOptions, cb: TurnCallbacks): TurnHandle {
           case "stream_event": {
             const e = msg.event;
             if (e.type === "content_block_delta" && e.delta.type === "text_delta") {
+              closeThinkingSpan();
               cb.onDelta(e.delta.text);
+            } else if (e.type === "content_block_delta" && e.delta.type === "thinking_delta") {
+              if (!thinkingStartedAt) thinkingStartedAt = Date.now();
+              thinkingParts.push(e.delta.thinking);
+              cb.onThinkingDelta?.(e.delta.thinking);
+            } else if (e.type === "content_block_stop") {
+              closeThinkingSpan();
             }
             break;
           }
@@ -102,8 +140,12 @@ export function runTurn(opts: TurnOptions, cb: TurnCallbacks): TurnHandle {
             }
             break;
           case "result":
+            closeThinkingSpan();
             if (msg.subtype === "success") {
-              cb.onDone(textParts.join("\n\n"), tools);
+              const thinking = thinkingParts.length
+                ? { text: thinkingParts.join(""), ms: thinkingMs }
+                : undefined;
+              cb.onDone(textParts.join("\n\n"), tools, thinking);
             } else {
               cb.onError(`引擎结束异常：${msg.subtype}`);
             }

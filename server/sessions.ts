@@ -15,6 +15,8 @@ export interface StoredMessage {
   text: string;
   /** 早期记录是字符串数组，后来带 detail，两种都要能读 */
   tools?: Array<string | { name: string; detail?: string }>;
+  /** 这条回复前的思考过程；没开思考就没有 */
+  thinking?: { text: string; ms: number };
   attachments?: Attachment[];
   at: string;
 }
