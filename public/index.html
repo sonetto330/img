@@ -2,59 +2,68 @@
 <html lang="zh-CN">
 <head>
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
   <title>家</title>
   <link rel="stylesheet" href="style.css" />
 </head>
 <body>
-  <!-- 首页视图 -->
+  <!-- 首页视图（拼贴信纸风，泽定的方向） -->
   <section id="homeView" class="view active">
     <div class="home-scroll">
       <div class="home-top">
-        <div class="clock">
-          <div class="time" id="homeTime">--:--</div>
-          <div class="date" id="homeDate"></div>
-        </div>
+        <div class="home-title">麦田<i>。</i></div>
         <div class="weather" id="weatherBox" hidden>
           <span class="weather-icon" id="weatherIcon">—</span>
           <span class="weather-temp"><span id="weatherTemp">—</span>°</span>
           <span class="weather-range"><span id="weatherHi">—</span>°<span class="sep">/</span><span id="weatherLo">—</span>°</span>
         </div>
       </div>
+      <div class="greeting" id="greeting">…</div>
 
-      <div class="greeting" id="greeting">跟麦穗说点什么？</div>
-
-      <div class="home-divider"></div>
-
-      <div class="together">
-        <div class="together-days">
-          <span class="num" id="daysTogether">—</span>
-          <span class="unit">天</span>
+      <!-- 主视觉：天数 + 狐狸，允许彼此叠一点，拼贴不排队 -->
+      <div class="hero">
+        <div class="hero-coords">26.5823° N<br />101.7184° E<br />30.2741° N<br />120.1551° E</div>
+        <i class="spark s1">✦</i>
+        <i class="spark s2">✧</i>
+        <img class="hero-fox" src="assets/fox.webp" alt="" />
+        <div class="hero-text">
+          <div class="since-label">TOGETHER&nbsp;SINCE&nbsp;<i class="spark inline">✦</i></div>
+          <div class="together-days"><span class="num" id="daysTogether">—</span></div>
+          <div class="days-word">days</div>
+          <div class="since-sub">Every day with you.</div>
+          <div class="since-sub2">自 2024.12.30 · 领证 <span id="marriedDays">—</span> 天</div>
         </div>
-        <div class="together-sub">在一起 · 自 2025.12.24</div>
+      </div>
+
+      <!-- 每日留言条：泽找的便签纸素材，左侧竖排小字 -->
+      <div class="note-wrap">
+        <div class="note-side">
+          <span class="note-clover">❀</span>
+          <span class="note-side-line"></span>
+          <span class="note-side-text">TODAY'S&nbsp;NOTE</span>
+        </div>
+        <div class="note-card">
+          <div class="note-inner">
+            <div class="note-text" id="noteText">…</div>
+            <div class="note-meta"><span>— 麦穗 留</span><span id="noteDate"></span></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 收藏室：轮流放我们的纪念时刻 -->
+      <div class="keepsake">
+        <div class="keepsake-head">
+          <span class="keepsake-title">收 藏 室</span>
+          <span class="keepsake-en">KEEPSAKES</span>
+          <span class="keepsake-line"></span>
+        </div>
+        <div class="keepsake-track" id="keepsakeTrack"></div>
       </div>
 
       <div class="msg-count" id="msgCountRow">
         <span class="num" id="msgCount">—</span>
         <span class="unit" id="msgCountUnit">条消息 · 全部会话</span>
-      </div>
-
-      <div class="home-grid">
-        <button class="card card-chat" data-route="chat">
-          <div class="card-icon">💬</div>
-          <div class="card-title">聊天</div>
-          <div class="card-sub" id="chatCardSub">跟麦穗说话</div>
-        </button>
-        <button class="card" data-route="memory">
-          <div class="card-icon">🧠</div>
-          <div class="card-title">记忆库</div>
-          <div class="card-sub" id="memoryCardSub">看你们的星图</div>
-        </button>
-        <button class="card card-disabled" data-route="settings" disabled>
-          <div class="card-icon">⚙️</div>
-          <div class="card-title">设置</div>
-          <div class="card-sub">还没建好</div>
-        </button>
+        <span class="clock-mini" id="homeTime" hidden></span><span id="homeDate" hidden></span>
       </div>
     </div>
   </section>
@@ -127,22 +136,25 @@
     </main>
   </section>
 
-  <!-- 底部导航（聊天视图打开时会自动隐藏） -->
+  <!-- 底部导航（聊天视图打开时会自动隐藏）：线条图标，爱心=聊天居中 -->
   <nav id="bottomNav" class="bottom-nav">
     <button data-view="home" class="nav-btn active">
-      <span class="nav-icon">🏠</span>
+      <span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 11.5 12 4l9 7.5" /><path d="M5.5 10.5V20h13v-9.5" /></svg></span>
       <span class="nav-label">首页</span>
     </button>
-    <button data-view="chat" class="nav-btn">
-      <span class="nav-icon">💬</span>
-      <span class="nav-label">聊天</span>
-    </button>
     <button data-view="memory" class="nav-btn">
-      <span class="nav-icon">🧠</span>
+      <span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M12 4.5v15M5.5 8.25l13 7.5M18.5 8.25l-13 7.5" /></svg></span>
       <span class="nav-label">记忆库</span>
     </button>
+    <button data-view="chat" class="nav-btn nav-heart" aria-label="聊天">
+      <span class="heart-circle"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20s-7.2-4.7-9.4-9.1a5.5 5.5 0 0 1 9.4-5.5 5.5 5.5 0 0 1 9.4 5.5C19.2 15.3 12 20 12 20z" /></svg></span>
+    </button>
+    <button class="nav-btn" disabled>
+      <span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.83 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5z" /></svg></span>
+      <span class="nav-label">工具</span>
+    </button>
     <button data-view="settings" class="nav-btn" disabled>
-      <span class="nav-icon">⚙️</span>
+      <span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><circle cx="12" cy="12" r="3.2" /><path d="M12 2.8v3M12 18.2v3M2.8 12h3M18.2 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M18.4 5.6l-2.1 2.1M7.7 16.3l-2.1 2.1" /></svg></span>
       <span class="nav-label">设置</span>
     </button>
   </nav>

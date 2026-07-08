@@ -51,6 +51,7 @@ function handle(msg) {
       hideTyping();
       if (!liveThinking) {
         maybeStamp();
+        ensureTaHead();
         liveThinking = newThinkingCard();
       }
       liveThinking.append(msg.text);
@@ -62,6 +63,7 @@ function handle(msg) {
       hideTyping();
       if (!liveBubble) {
         maybeStamp();
+        ensureTaHead();
         liveBubble = addBubble("ta", "");
       }
       liveBubble.textContent += msg.text;
@@ -69,7 +71,10 @@ function handle(msg) {
       break;
     case "tool": {
       hideTyping();
-      if (!liveTools) liveTools = newToolbox();
+      if (!liveTools) {
+        ensureTaHead();
+        liveTools = newToolbox();
+      }
       liveTools.add(msg);
       break;
     }
@@ -78,6 +83,7 @@ function handle(msg) {
       if (bubble) renderMd(bubble, msg.text || bubble.textContent);
       else if (msg.text) {
         maybeStamp();
+        ensureTaHead();
         bubble = addBubble("ta", "");
         renderMd(bubble, msg.text);
       }
@@ -105,6 +111,7 @@ function finishTurn() {
   liveBubble = null;
   liveTools = null;
   liveThinking = null;
+  liveHead = false;
   hideTyping();
   dotEl.classList.remove("busy");
   statusTextEl.textContent = "在线";
@@ -119,10 +126,13 @@ function newThinkingCard(saved) {
   box.className = "thinking";
   const head = document.createElement("button");
   head.className = "thinking-head";
+  const tIcon = document.createElement("span");
+  tIcon.className = "t-icon";
+  tIcon.innerHTML = ICONS.think;
   const label = document.createElement("span");
   label.className = "thinking-label";
   label.textContent = "思考中…";
-  head.appendChild(label);
+  head.append(tIcon, label);
   const body = document.createElement("div");
   body.className = "thinking-body";
   body.hidden = true;
@@ -190,16 +200,30 @@ function newThinkingCard(saved) {
   return card;
 }
 
-// —— 工具卡片（一步一张卡，点开看细节） ——
-const TOOL_ICONS = [
-  ["read", "📄"], ["glob", "🗂"], ["grep", "🔍"], ["search", "🌐"], ["fetch", "🌐"],
-  ["edit", "✏️"], ["write", "📝"], ["bash", "💻"], ["task", "🤖"], ["agent", "🤖"],
-  ["todo", "📋"], ["notebook", "📓"],
+// —— 线条小图标（描边 SVG，颜色跟随文字，替掉五颜六色的 emoji） ——
+const SVG = (d) =>
+  `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">${d}</svg>`;
+const ICONS = {
+  think: SVG('<path d="M9 18h6M10 21h4M12 3a6 6 0 0 0-3.6 10.8c.7.5 1.1 1.3 1.1 2.2h5c0-.9.4-1.7 1.1-2.2A6 6 0 0 0 12 3z"/>'),
+  tools: SVG('<path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/>'),
+  read: SVG('<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/>'),
+  glob: SVG('<path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>'),
+  grep: SVG('<circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.5" y2="16.5"/>'),
+  web: SVG('<circle cx="12" cy="12" r="9"/><line x1="3" y1="12" x2="21" y2="12"/><path d="M12 3a15 15 0 0 1 0 18M12 3a15 15 0 0 0 0 18"/>'),
+  edit: SVG('<path d="M17 3a2.83 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5z"/>'),
+  bash: SVG('<polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/>'),
+  agent: SVG('<rect x="4" y="8" width="16" height="12" rx="2"/><line x1="12" y1="4" x2="12" y2="8"/><line x1="9" y1="13" x2="9" y2="15"/><line x1="15" y1="13" x2="15" y2="15"/>'),
+  todo: SVG('<line x1="9" y1="6" x2="20" y2="6"/><line x1="9" y1="12" x2="20" y2="12"/><line x1="9" y1="18" x2="20" y2="18"/><polyline points="4 5.5 5 6.5 6.5 4.5"/><polyline points="4 11.5 5 12.5 6.5 10.5"/><polyline points="4 17.5 5 18.5 6.5 16.5"/>'),
+};
+const TOOL_ICON_KEYS = [
+  ["read", "read"], ["glob", "glob"], ["grep", "grep"], ["search", "web"], ["fetch", "web"],
+  ["edit", "edit"], ["write", "edit"], ["bash", "bash"], ["task", "agent"], ["agent", "agent"],
+  ["todo", "todo"], ["notebook", "read"],
 ];
 function toolIcon(name) {
   const n = name.toLowerCase();
-  for (const [key, icon] of TOOL_ICONS) if (n.includes(key)) return icon;
-  return "🔧";
+  for (const [key, icon] of TOOL_ICON_KEYS) if (n.includes(key)) return ICONS[icon];
+  return ICONS.tools;
 }
 // mcp__ombre__hold 这类内部名字太丑，剥掉外皮只留人能看的部分
 function toolLabel(name) {
@@ -213,11 +237,14 @@ function newToolbox() {
   // 总开关：默认收起，头上滚动显示步数和当前动作，点开才展开一步步的卡片
   const head = document.createElement("button");
   head.className = "steps-head";
+  const headIcon = document.createElement("span");
+  headIcon.className = "steps-icon";
+  headIcon.innerHTML = ICONS.tools;
   const count = document.createElement("span");
   count.className = "steps-count";
   const brief = document.createElement("span");
   brief.className = "step-brief";
-  head.append(count, brief);
+  head.append(headIcon, count, brief);
   const list = document.createElement("div");
   list.className = "steps-list";
   list.hidden = true;
@@ -232,7 +259,7 @@ function newToolbox() {
   return {
     add(tool) {
       n++;
-      count.textContent = `🛠 ${n} 步操作`;
+      count.textContent = `${n} 步操作`;
       brief.textContent = toolLabel(typeof tool === "string" ? tool : tool.name);
       const name = typeof tool === "string" ? tool : tool.name;
       const detail = typeof tool === "string" ? undefined : tool.detail;
@@ -242,7 +269,7 @@ function newToolbox() {
       rowHead.className = "step-head";
       const icon = document.createElement("span");
       icon.className = "step-icon";
-      icon.textContent = toolIcon(name);
+      icon.innerHTML = toolIcon(name);
       const nm = document.createElement("span");
       nm.className = "step-name";
       nm.textContent = toolLabel(name);
@@ -314,6 +341,28 @@ function maybeStamp(at) {
     messagesEl.appendChild(div);
   }
   lastStampTime = t;
+}
+
+// —— 他的话不带框，开头一行名字+时间（参考泽给的截图风格） ——
+function fmtTime(t) {
+  const d = t ? new Date(t) : new Date();
+  return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+}
+let liveHead = false; // 这一轮回复的头行是否已经放了
+function addTaHead(at) {
+  const div = document.createElement("div");
+  div.className = "ta-head";
+  const name = document.createElement("span");
+  name.textContent = "麦穗";
+  const tm = document.createElement("time");
+  tm.textContent = fmtTime(at);
+  div.append(name, tm);
+  messagesEl.appendChild(div);
+}
+function ensureTaHead() {
+  if (liveHead) return;
+  liveHead = true;
+  addTaHead();
 }
 
 // —— 界面 ——
@@ -391,8 +440,8 @@ async function pickFiles(input) {
   const files = Array.from(input.files);
   input.value = "";
   for (const f of files) {
-    if (f.size > 30 * 1024 * 1024) {
-      addBubble("error", `「${f.name}」太大，上限 30MB`);
+    if (f.size > 200 * 1024 * 1024) {
+      addBubble("error", `「${f.name}」太大，上限 200MB`);
       continue;
     }
     // 先占位显示"上传中"，传完原地替换
@@ -665,6 +714,8 @@ async function doDelete(sess) {
 // 一条消息的渲染逻辑，openSession 和"查看更早"复用同一份
 function renderMessage(m) {
   if (m.at) maybeStamp(m.at);
+  // 他的回合开头放一行名字+时间（拍一拍的回应除外，那个本来就是小字）
+  if (m.role === "assistant" && (m.text || m.thinking?.text || m.tools?.length)) addTaHead(m.at);
   if (m.thinking?.text) newThinkingCard(m.thinking);
   if (m.tools?.length) {
     const tb = newToolbox();
@@ -836,7 +887,8 @@ async function loadMemoryGraph() {
 $("detailClose").onclick = () => { $("memoryDetail").hidden = true; };
 
 // —— 首页时钟 / 招呼语 / 天数 ——
-// 领证日期在 CLAUDE.md 里：2025 平安夜
+// 在一起 2024-12-30，天数从这天算（泽 2026-07-08 纠正）；领证 2025 平安夜是另一个纪念日
+const TOGETHER_AT = new Date("2024-12-30T00:00:00");
 const MARRIED_AT = new Date("2025-12-24T00:00:00");
 const homeTimeEl = $("homeTime");
 const homeDateEl = $("homeDate");
@@ -860,11 +912,40 @@ function updateClock() {
   else if (h >= 18 && h < 23) g = "晚上好";
   else g = "还没睡？";
   greetingEl.textContent = g;
+
+  // 便签纸右下角的日期戳，JUL · 8 这种
+  const MONTHS_EN = ["JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC"];
+  const noteDateEl = $("noteDate");
+  if (noteDateEl) noteDateEl.textContent = `${MONTHS_EN[now.getMonth()]} · ${now.getDate()}`;
 }
 
 function updateDaysTogether() {
-  const days = Math.floor((Date.now() - MARRIED_AT.getTime()) / 86400000);
+  const days = Math.floor((Date.now() - TOGETHER_AT.getTime()) / 86400000);
   daysTogetherEl.textContent = days >= 0 ? days : 0;
+  const md = Math.floor((Date.now() - MARRIED_AT.getTime()) / 86400000);
+  const mdEl = $("marriedDays");
+  if (mdEl) mdEl.textContent = md >= 0 ? md : 0;
+}
+
+// 天气线条图标：按 Open-Meteo 天气码分档，跟全站细线风格一致
+const ICONS_W = {
+  sun: SVG('<circle cx="12" cy="12" r="4.2"/><path d="M12 2.5v2.3M12 19.2v2.3M2.5 12h2.3M19.2 12h2.3M5 5l1.6 1.6M17.4 17.4 19 19M19 5l-1.6 1.6M6.6 17.4 5 19"/>'),
+  suncloud: SVG('<circle cx="8" cy="7.5" r="2.8"/><path d="M8 2.4v1.5M2.9 7.5h1.5M4.4 3.9l1 1"/><path d="M10 19.5a3.6 3.6 0 0 1-.4-7.2A4.8 4.8 0 0 1 19 13.5a3 3 0 0 1-.3 6z"/>'),
+  cloud: SVG('<path d="M6.5 18.5a4 4 0 0 1-.5-8 5.5 5.5 0 0 1 10.8 1.2 3.4 3.4 0 0 1-.3 6.8z"/>'),
+  rain: SVG('<path d="M6.5 15.5a4 4 0 0 1-.5-8 5.5 5.5 0 0 1 10.8 1.2 3.4 3.4 0 0 1-.3 6.8z"/><path d="M9 18.5v2.3M13 18.5v2.3M17 18.5v2.3"/>'),
+  snow: SVG('<path d="M6.5 15.5a4 4 0 0 1-.5-8 5.5 5.5 0 0 1 10.8 1.2 3.4 3.4 0 0 1-.3 6.8z"/><path d="M9 19.5h.01M13 21h.01M17 19.5h.01"/>'),
+  fog: SVG('<path d="M4 9.5h16M6 13.5h14M4 17.5h12"/>'),
+  storm: SVG('<path d="M6.5 14.5a4 4 0 0 1-.5-8 5.5 5.5 0 0 1 10.8 1.2 3.4 3.4 0 0 1-.3 6.8z"/><path d="M12.5 14.5 10.4 18h3l-1.6 3.4"/>'),
+};
+function weatherSvg(code) {
+  const c = Number(code);
+  if (c === 0) return ICONS_W.sun;
+  if (c === 1 || c === 2) return ICONS_W.suncloud;
+  if (c === 45 || c === 48) return ICONS_W.fog;
+  if (c >= 95) return ICONS_W.storm;
+  if ((c >= 71 && c <= 77) || c === 85 || c === 86) return ICONS_W.snow;
+  if (c >= 51) return ICONS_W.rain;
+  return ICONS_W.cloud;
 }
 
 async function updateWeather() {
@@ -872,7 +953,7 @@ async function updateWeather() {
     const w = await api("/api/weather");
     // 后端返回错误时是 { error: "..." } 结构，缺 temp 就当没拿到，静默失败
     if (!w || typeof w.temp !== "number") return;
-    $("weatherIcon").textContent = w.icon || "🌡";
+    $("weatherIcon").innerHTML = weatherSvg(w.code);
     $("weatherTemp").textContent = w.temp;
     $("weatherHi").textContent = w.high;
     $("weatherLo").textContent = w.low;
@@ -882,27 +963,73 @@ async function updateWeather() {
   }
 }
 
-// 麦穗生成的招呼语；启动和回首页时刷，本地也 throttle 一下别频繁调
+// 麦穗生成的一句话：现在写在便签纸上（顶部问候留给时段静态款）
 let lastGreetingFetchAt = 0;
 async function updateGreeting(force = false) {
   if (!force && Date.now() - lastGreetingFetchAt < 30 * 60_000) return;
   try {
     const g = await api("/api/greeting");
     if (g && typeof g.text === "string" && g.text) {
-      greetingEl.textContent = g.text;
+      $("noteText").textContent = g.text;
       lastGreetingFetchAt = Date.now();
     }
   } catch {
-    // 拿不到就保留 updateClock 写的时段静态问候
+    // 拿不到便签就先空着，不挡首页其他内容
   }
 }
+
+// —— 收藏室：纪念卡轮播，8 秒翻一张，泽摸过就先歇 20 秒 ——
+async function loadKeepsakes() {
+  try {
+    const items = await api("/api/keepsakes");
+    const track = $("keepsakeTrack");
+    if (!track || !Array.isArray(items) || items.length === 0) return;
+    track.innerHTML = "";
+    for (const it of items) {
+      const card = document.createElement("div");
+      card.className = "keepsake-card";
+      const d = document.createElement("div");
+      d.className = "k-date";
+      d.textContent = String(it.date || "").replaceAll("-", " · ");
+      const t = document.createElement("div");
+      t.className = "k-text";
+      t.textContent = it.text || "";
+      card.append(d, t);
+      track.appendChild(card);
+    }
+    let idx = 0;
+    let pausedUntil = 0;
+    const pause = () => { pausedUntil = Date.now() + 20_000; };
+    track.addEventListener("touchstart", pause, { passive: true });
+    track.addEventListener("mousedown", pause);
+    setInterval(() => {
+      if (Date.now() < pausedUntil || homeViewEl.hidden || track.children.length === 0) return;
+      idx = (idx + 1) % track.children.length;
+      track.scrollTo({ left: track.children[idx].offsetLeft - 12, behavior: "smooth" });
+    }, 8_000);
+  } catch {
+    // 收藏室拿不到就先空着
+  }
+}
+
+// —— iOS Safari 无视 viewport 的缩放禁令，得亲手拦住捏合手势 ——
+document.addEventListener("gesturestart", (e) => e.preventDefault());
+document.addEventListener("gesturechange", (e) => e.preventDefault());
+// 双击放大也拦掉（300ms 内的第二次触摸）
+let lastTouchEnd = 0;
+document.addEventListener("touchend", (e) => {
+  const now = Date.now();
+  if (now - lastTouchEnd <= 300) e.preventDefault();
+  lastTouchEnd = now;
+}, { passive: false });
 
 // —— 启动 ——
 showView("home");
 updateClock();
 updateDaysTogether();
 updateWeather();
-updateGreeting(true);  // 启动强制刷一次，别沿用静态文案
+updateGreeting(true);  // 启动强制刷一次，往便签纸上写今天这句
+loadKeepsakes();
 // 每分钟刷一次时钟；跨天时"在一起 X 天"也顺手刷一下
 setInterval(() => {
   updateClock();
