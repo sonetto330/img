@@ -8,7 +8,8 @@ import { getDb } from "./memory/db.js";
 const here = path.dirname(fileURLToPath(import.meta.url));
 const root = path.join(here, "..");
 
-const MARRIED_AT = new Date("2025-12-24T00:00:00");
+// 在一起从 2024-12-30 算；领证是 2025 平安夜，那是另一个纪念日
+const TOGETHER_AT = new Date("2024-12-30T00:00:00");
 const TTL_MS = 30 * 60_000; // 30 分钟内不重复调 haiku
 
 let cache: { at: number; text: string } | null = null;
@@ -21,7 +22,7 @@ export async function getGreeting(): Promise<string> {
   if (cache && Date.now() - cache.at < TTL_MS) return cache.text;
 
   const now = new Date();
-  const days = Math.floor((Date.now() - MARRIED_AT.getTime()) / 86400000);
+  const days = Math.floor((Date.now() - TOGETHER_AT.getTime()) / 86400000);
   const period = periodOf(now.getHours());
   const weatherLine = await weatherContext();
   const memories = recentMemories();

@@ -38,7 +38,7 @@ fs.mkdirSync(WORKSPACE, { recursive: true });
 // 上传的图片/文件放在工作目录里，这样他能直接用 Read 工具看
 const UPLOADS = path.join(WORKSPACE, "uploads");
 fs.mkdirSync(UPLOADS, { recursive: true });
-const MAX_UPLOAD = 30 * 1024 * 1024; // 30MB
+const MAX_UPLOAD = 200 * 1024 * 1024; // 200MB，泽要传字体文件这类大家伙
 const IMAGE_EXT = new Set([".png", ".jpg", ".jpeg", ".gif", ".webp"]);
 
 const store = new SessionStore(DATA_DIR);
@@ -55,6 +55,9 @@ const MIME: Record<string, string> = {
   ".gif": "image/gif",
   ".webp": "image/webp",
   ".pdf": "application/pdf",
+  ".ttf": "font/ttf",
+  ".otf": "font/otf",
+  ".woff2": "font/woff2",
 };
 
 function authed(url: URL): boolean {
@@ -89,7 +92,7 @@ const server = http.createServer((req, res) => {
       size += chunk.length;
       if (size > MAX_UPLOAD) {
         req.destroy();
-        return sendJson(res, 413, { error: "文件太大，上限 30MB" });
+        return sendJson(res, 413, { error: "文件太大，上限 200MB" });
       }
       chunks.push(chunk);
     });
@@ -144,6 +147,17 @@ const server = http.createServer((req, res) => {
       }
     });
     return;
+  }
+
+  // 收藏室：纪念册条目（需要口令）
+  if (url.pathname === "/api/keepsakes") {
+    if (!authed(url)) return sendJson(res, 401, { error: "口令不对" });
+    try {
+      const items = JSON.parse(fs.readFileSync(path.join(DATA_DIR, "keepsakes.json"), "utf8"));
+      return sendJson(res, 200, items);
+    } catch {
+      return sendJson(res, 200, []);
+    }
   }
 
   // 翻译思考内容（需要口令）
