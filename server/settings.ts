@@ -81,3 +81,32 @@ export function useApiNow(): boolean {
 export function looksLikeLimitError(message: string): boolean {
   return /usage limit|limit reached|rate.?limit|out of.*(credit|quota)|exceeded/i.test(message);
 }
+
+/**
+ * 给一次性小任务（问候语/翻译/记忆提取）用的通道自动回退：
+ * 先按当前设置跑；订阅这边抛错、或产出看着像限额提示时，
+ * auto 通道下换外部 API 原样重跑一次。主聊天/通话有自己的流式重试逻辑，不走这里。
+ *
+ * @param isLimitResult 可选：额度耗尽时 CLI 不报错而是把英文提示当正文吐出来，
+ *   用它检查"成功"的产出是不是其实是限额提示
+ */
+export async function withChannelFallback<T>(
+  tag: string,
+  run: (useApi: boolean) => Promise<T>,
+  isLimitResult?: (result: T) => boolean,
+): Promise<T> {
+  const first = useApiNow();
+  const canRetry = !first && getSettings().channel === "auto" && externalConfigured();
+  try {
+    const result = await run(first);
+    if (canRetry && isLimitResult?.(result)) {
+      console.error(`[${tag}] 订阅额度用尽，换外部 API 重试`);
+      return run(true);
+    }
+    return result;
+  } catch (err) {
+    if (!canRetry) throw err;
+    console.error(`[${tag}] 订阅通道失败（${err instanceof Error ? err.message.slice(0, 120) : err}），换外部 API 重试`);
+    return run(true);
+  }
+}

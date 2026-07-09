@@ -457,44 +457,66 @@ wss.on("connection", (ws: WebSocket, req) => {
       send({ type: "session", sessionId: record.id, title: record.title, mode: record.mode });
 
       // 拍一拍不动工具，就不装 mcpServers；模式提示词还是照常挂
-      active = runTurn(
-        {
-          prompt: "（泽拍了拍你，用一两句话回应，别干活）",
-          resume: record.claudeSessionId,
-          cwd: WORKSPACE,
-          permissionMode: PERMISSION_MODE,
-          persona: loadPersona(),
-          modePrompt: loadModePrompt(record.mode),
-          model: process.env.CLAUDE_MODEL || "claude-opus-4-7",
-          maxTurns: 1,
-          now: nowString(),
-          env: channelEnv(useApiNow()),
-        },
-        {
-          onClaudeSession(claudeSessionId) {
-            record.claudeSessionId = claudeSessionId;
-            store.save(record);
+      // auto 通道下订阅翻车（还没吐内容时）就换外部 API 重拍一次，跟主聊天同款逻辑
+      const launchPat = (useApi: boolean, isRetry: boolean) => {
+        let gotOutput = false;
+        active = runTurn(
+          {
+            prompt: "（泽拍了拍你，用一两句话回应，别干活）",
+            resume: record.claudeSessionId,
+            cwd: WORKSPACE,
+            permissionMode: PERMISSION_MODE,
+            persona: loadPersona(),
+            modePrompt: loadModePrompt(record.mode),
+            model: process.env.CLAUDE_MODEL || "claude-opus-4-7",
+            maxTurns: 1,
+            now: nowString(),
+            env: channelEnv(useApi),
           },
-          onDelta(text) {
-            send({ type: "delta", text });
+          {
+            onClaudeSession(claudeSessionId) {
+              record.claudeSessionId = claudeSessionId;
+              store.save(record);
+            },
+            onDelta(text) {
+              gotOutput = true;
+              send({ type: "delta", text });
+            },
+            onTool(tool) {
+              gotOutput = true;
+              send({ type: "tool", name: tool.name, detail: tool.detail });
+            },
+            onDone(finalText, tools) {
+              if (
+                !isRetry && !useApi && getSettings().channel === "auto" && externalConfigured() &&
+                tools.length === 0 && finalText.length < 160 && looksLikeLimitError(finalText)
+              ) {
+                console.error(`[pat] 订阅额度用尽（${finalText.slice(0, 80)}），换外部 API 重试`);
+                send({ type: "channel_fallback" });
+                launchPat(true, true);
+                return;
+              }
+              active = null;
+              record.messages.push({ role: "assistant", text: finalText, tools, at: new Date().toISOString() });
+              store.save(record);
+              send({ type: "done", text: finalText });
+              if (!anyoneWatching()) barkPush("麦穗", finalText).catch(() => {});
+            },
+            onError(message) {
+              if (!isRetry && !useApi && getSettings().channel === "auto" && externalConfigured() && !gotOutput) {
+                console.error(`[pat] 订阅通道失败（${message.slice(0, 120)}），换外部 API 重试`);
+                send({ type: "channel_fallback" });
+                launchPat(true, true);
+                return;
+              }
+              active = null;
+              send({ type: "error", message });
+              if (!anyoneWatching()) barkPush("麦穗（出错）", message).catch(() => {});
+            },
           },
-          onTool(tool) {
-            send({ type: "tool", name: tool.name, detail: tool.detail });
-          },
-          onDone(finalText, tools) {
-            active = null;
-            record.messages.push({ role: "assistant", text: finalText, tools, at: new Date().toISOString() });
-            store.save(record);
-            send({ type: "done", text: finalText });
-            if (!anyoneWatching()) barkPush("麦穗", finalText).catch(() => {});
-          },
-          onError(message) {
-            active = null;
-            send({ type: "error", message });
-            if (!anyoneWatching()) barkPush("麦穗（出错）", message).catch(() => {});
-          },
-        },
-      );
+        );
+      };
+      launchPat(useApiNow(), false);
       return;
     }
 

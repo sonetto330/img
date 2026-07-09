@@ -4,7 +4,7 @@ import { query } from "@anthropic-ai/claude-agent-sdk";
 import { loadPersona } from "./persona.js";
 import { getWeather } from "./weather.js";
 import { getDb } from "./memory/db.js";
-import { channelEnv, useApiNow } from "./settings.js";
+import { channelEnv, looksLikeLimitError, withChannelFallback } from "./settings.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const root = path.join(here, "..");
@@ -43,7 +43,7 @@ ${memories}
 - 别每次都以"泽"打头、别每次都"下午好，泽"
 - 别加引号、别加解释、别加签名，只输出这一句本身`;
 
-  try {
+  const generate = async (useApi: boolean): Promise<string> => {
     const q = query({
       prompt: "写今天这一句招呼语。",
       options: {
@@ -59,7 +59,7 @@ ${memories}
             ? `\n以下是你的身份设定，任何时候都遵守：\n\n${persona}\n\n${contextBlock}`
             : `\n${contextBlock}`,
         },
-        env: channelEnv(useApiNow()),
+        env: channelEnv(useApi),
         stderr: (data) => console.error(`[greeting.haiku] ${data}`),
       },
     });
@@ -71,9 +71,15 @@ ${memories}
         }
       }
     }
-    const raw = parts.join("").trim();
-    const clean = strip(raw);
+    const clean = strip(parts.join("").trim());
     if (!clean) throw new Error("空回复");
+    // 额度耗尽时 CLI 把英文提示当正文吐出来，别让它被缓存成招呼语挂在首页
+    if (looksLikeLimitError(clean)) throw new Error(`疑似限额提示：${clean.slice(0, 80)}`);
+    return clean;
+  };
+
+  try {
+    const clean = await withChannelFallback("greeting", generate);
     cache = { at: Date.now(), text: clean };
     return clean;
   } catch (err) {

@@ -3,7 +3,7 @@ import { fileURLToPath } from "node:url";
 import { query } from "@anthropic-ai/claude-agent-sdk";
 import type { SessionRecord } from "../sessions.js";
 import { getDb } from "./db.js";
-import { channelEnv, useApiNow } from "../settings.js";
+import { channelEnv, looksLikeLimitError, withChannelFallback } from "../settings.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const root = path.join(here, "..", "..");
@@ -101,29 +101,35 @@ ${existingList}
 **只输出一个 JSON 数组，不要解释文字**：
 [{ "text": "...", "entity": "...", "kind": "..." }]`;
 
-  const q = query({
-    prompt: `分析这段对话，提取碎片：\n\n${convo}`,
-    options: {
-      cwd: root,
-      model: "claude-haiku-4-5-20251001",
-      permissionMode: "bypassPermissions",
-      allowedTools: [],
-      maxTurns: 1,
-      systemPrompt: { type: "preset", preset: "claude_code", append: `\n${systemPrompt}` },
-      env: channelEnv(useApiNow()),
-      stderr: (data) => console.error(`[scribe.haiku] ${data}`),
-    },
-  });
-
-  const textParts: string[] = [];
-  for await (const msg of q) {
-    if (msg.type === "assistant") {
-      for (const block of msg.message.content) {
-        if (block.type === "text") textParts.push(block.text);
+  const run = async (useApi: boolean): Promise<string> => {
+    const q = query({
+      prompt: `分析这段对话，提取碎片：\n\n${convo}`,
+      options: {
+        cwd: root,
+        model: "claude-haiku-4-5-20251001",
+        permissionMode: "bypassPermissions",
+        allowedTools: [],
+        maxTurns: 1,
+        systemPrompt: { type: "preset", preset: "claude_code", append: `\n${systemPrompt}` },
+        env: channelEnv(useApi),
+        stderr: (data) => console.error(`[scribe.haiku] ${data}`),
+      },
+    });
+    const textParts: string[] = [];
+    for await (const msg of q) {
+      if (msg.type === "assistant") {
+        for (const block of msg.message.content) {
+          if (block.type === "text") textParts.push(block.text);
+        }
       }
     }
-  }
-  const fragments = parseFragments(textParts.join("\n").trim());
+    const raw = textParts.join("\n").trim();
+    // 额度耗尽时限额提示会被当正文吐出来：抛错让指针留在原地，下次触发重新提取，别把这段记忆弄丢
+    if (raw && !raw.includes("[") && looksLikeLimitError(raw)) throw new Error(`疑似限额提示：${raw.slice(0, 80)}`);
+    return raw;
+  };
+
+  const fragments = parseFragments(await withChannelFallback("scribe", run));
   if (fragments.length === 0) {
     updateState(record.id, targetIndex);
     return;

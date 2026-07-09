@@ -1,5 +1,5 @@
 import { query } from "@anthropic-ai/claude-agent-sdk";
-import { channelEnv, useApiNow } from "./settings.js";
+import { channelEnv, looksLikeLimitError, withChannelFallback } from "./settings.js";
 
 /** 思考内容太长就掐头去尾，翻译按钮是给人看个大意的，不是做文献 */
 const MAX_INPUT = 8000;
@@ -7,22 +7,30 @@ const MAX_INPUT = 8000;
 /** 把英文思考过程翻成中文口语。用 haiku：快、便宜，翻译够用 */
 export async function translateThinking(text: string): Promise<string> {
   const input = text.length > MAX_INPUT ? text.slice(0, MAX_INPUT) + "\n…（后面太长截掉了）" : text;
-  const q = query({
-    prompt: `把下面这段 AI 的内心思考过程翻译成自然的中文口语。保持第一人称视角，语气随意点。只输出译文，不要任何解释或前后缀：\n\n${input}`,
-    options: {
-      model: "haiku",
-      maxTurns: 1,
-      allowedTools: [],
-      thinking: { type: "disabled" },
-      systemPrompt: "你是翻译。只输出译文本身。",
-      env: channelEnv(useApiNow()),
-    },
-  });
-  for await (const msg of q) {
-    if (msg.type === "result") {
-      if (msg.subtype === "success") return msg.result.trim();
-      throw new Error(`翻译失败：${msg.subtype}`);
+  const run = async (useApi: boolean): Promise<string> => {
+    const q = query({
+      prompt: `把下面这段 AI 的内心思考过程翻译成自然的中文口语。保持第一人称视角，语气随意点。只输出译文，不要任何解释或前后缀：\n\n${input}`,
+      options: {
+        model: "haiku",
+        maxTurns: 1,
+        allowedTools: [],
+        thinking: { type: "disabled" },
+        systemPrompt: "你是翻译。只输出译文本身。",
+        env: channelEnv(useApi),
+      },
+    });
+    for await (const msg of q) {
+      if (msg.type === "result") {
+        if (msg.subtype === "success") {
+          const out = msg.result.trim();
+          // 额度耗尽时限额提示会被当成"成功译文"返回，识别出来当失败抛
+          if (looksLikeLimitError(out) && out.length < 200) throw new Error(`疑似限额提示：${out.slice(0, 80)}`);
+          return out;
+        }
+        throw new Error(`翻译失败：${msg.subtype}`);
+      }
     }
-  }
-  throw new Error("翻译没有返回结果");
+    throw new Error("翻译没有返回结果");
+  };
+  return withChannelFallback("translate", run);
 }
