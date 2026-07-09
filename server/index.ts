@@ -20,7 +20,7 @@ import { getGraph, getEntityDetail, getCoreDetail } from "./memory/graph.js";
 import { loadPersona } from "./persona.js";
 import { getGreeting } from "./greeting.js";
 import { translateThinking } from "./translate.js";
-import { getSettings, setChannel, setExternal, publicSettings, channelEnv, externalConfigured, useApiNow, looksLikeLimitError, modelForChannel, isKnownExternalModel, type Channel } from "./settings.js";
+import { getSettings, setChannel, setExternal, publicSettings, channelEnv, externalConfigured, useApiNow, looksLikeLimitError, modelForChannel, type Channel } from "./settings.js";
 import { listExternalModels, SUBSCRIPTION_MODELS } from "./models.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -480,8 +480,8 @@ wss.on("connection", (ws: WebSocket, req) => {
     if (ws.readyState === ws.OPEN) ws.send(JSON.stringify(payload));
   };
 
-  // 前端传来的模型别名，只认这仨；不认识的当没传，走默认
-  const MODEL_ALIASES = new Set(["opus", "sonnet", "haiku"]);
+  // 前端传来的模型：别名、外部列表里的、手填的完整型号都认，只挡明显不像模型名的垃圾
+  const looksLikeModelId = (m: string) => /^[\w][\w.:/-]{0,119}$/.test(m) && m !== "__custom";
 
   ws.on("message", (raw) => {
     let msg: { type?: string; sessionId?: string; text?: string; mode?: string; attachments?: Attachment[]; model?: string };
@@ -581,8 +581,9 @@ wss.on("connection", (ws: WebSocket, req) => {
 
     const text = msg.text?.trim() || "";
     if (msg.type !== "chat" || (!text && attachments.length === 0)) return;
-    const model = MODEL_ALIASES.has(msg.model || "") || isKnownExternalModel(msg.model || "")
-      ? msg.model!
+    const requested = (msg.model || "").trim();
+    const model = requested && looksLikeModelId(requested)
+      ? requested
       : process.env.CLAUDE_MODEL || "claude-opus-4-7";
     if (active) return send({ type: "error", message: "上一条还在跑，等等或者先打断" });
 

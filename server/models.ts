@@ -1,5 +1,5 @@
 import { fetch, ProxyAgent, type Dispatcher } from "undici";
-import { externalRequest, rememberExternalModels } from "./settings.js";
+import { externalRequest } from "./settings.js";
 
 // 走跟天气/TTS 一样的代理策略：Node fetch 不读 HTTPS_PROXY，靠 undici dispatcher
 const PROXY = process.env.HTTPS_PROXY || process.env.HTTP_PROXY || "";
@@ -44,7 +44,6 @@ export async function listExternalModels(force = false): Promise<{ models: Model
       .map((m) => ({ id: m.id, name: typeof m.display_name === "string" && m.display_name ? m.display_name : m.id }));
     if (!models.length) return { models: cache?.list ?? [], error: "对面返回了空列表" };
     cache = { at: Date.now(), list: models };
-    rememberExternalModels(models.map((m) => m.id));
     return { models };
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);

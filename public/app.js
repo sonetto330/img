@@ -544,37 +544,79 @@ if (modelSelect.value !== (localStorage.getItem("home_model") || "")) {
   localStorage.removeItem("home_model");
 }
 modelSelect.onchange = () => {
+  if (modelSelect.value === "__custom") return handleCustomModel();
   if (modelSelect.value) localStorage.setItem("home_model", modelSelect.value);
   else localStorage.removeItem("home_model");
 };
 
-// 从服务端拉模型列表重建选择器：订阅一组、外部一组（中转站的模型名常跟官方不一样）
+// —— 模型列表：订阅一组（写死仨别名）、外部一组（现拉）、手填一组（本机记住） ——
 let modelsCache = null;
-async function loadModels(refresh = false) {
-  const data = await api(`/api/models${refresh ? "?refresh=1" : ""}`);
-  modelsCache = data;
+
+function customModels() {
+  try {
+    const list = JSON.parse(localStorage.getItem("home_custom_models") || "[]");
+    return Array.isArray(list) ? list.filter((x) => typeof x === "string" && x) : [];
+  } catch {
+    return [];
+  }
+}
+
+function rebuildModelOptions() {
   const saved = localStorage.getItem("home_model") || "";
+  const subs = (modelsCache && modelsCache.subscription) || [
+    { id: "opus", name: "Opus" }, { id: "sonnet", name: "Sonnet" }, { id: "haiku", name: "Haiku" },
+  ];
   modelSelect.innerHTML = "";
   modelSelect.appendChild(new Option("默认", ""));
   const subGroup = document.createElement("optgroup");
   subGroup.label = "订阅";
-  for (const m of data.subscription) subGroup.appendChild(new Option(m.name, m.id));
+  for (const m of subs) subGroup.appendChild(new Option(m.name, m.id));
   modelSelect.appendChild(subGroup);
-  if (data.external.length) {
+  if (modelsCache && modelsCache.external.length) {
     const extGroup = document.createElement("optgroup");
     extGroup.label = "外部 API";
-    for (const m of data.external) extGroup.appendChild(new Option(m.name, m.id));
+    for (const m of modelsCache.external) extGroup.appendChild(new Option(m.name, m.id));
     modelSelect.appendChild(extGroup);
   }
+  const customs = customModels();
+  if (customs.length) {
+    const cusGroup = document.createElement("optgroup");
+    cusGroup.label = "手填";
+    for (const id of customs) cusGroup.appendChild(new Option(id, id));
+    modelSelect.appendChild(cusGroup);
+  }
+  modelSelect.appendChild(new Option("✏️ 手填型号…", "__custom"));
   // 恢复本机记的选择；已经不在列表里就回默认
   modelSelect.value = saved;
   if (modelSelect.value !== saved) {
     modelSelect.value = "";
     localStorage.removeItem("home_model");
   }
+}
+
+function handleCustomModel() {
+  const input = (prompt("填完整模型型号，比如 claude-opus-4-5\n（填「清空」可删掉所有手填过的）") || "").trim();
+  if (!input) return rebuildModelOptions(); // 取消/空输入：恢复原选择
+  if (input === "清空") {
+    const wasCustom = customModels().includes(localStorage.getItem("home_model") || "");
+    localStorage.removeItem("home_custom_models");
+    if (wasCustom) localStorage.removeItem("home_model"); // 正选着手填的，跟着回默认
+    return rebuildModelOptions();
+  }
+  const list = [...new Set([...customModels(), input])];
+  localStorage.setItem("home_custom_models", JSON.stringify(list));
+  localStorage.setItem("home_model", input);
+  rebuildModelOptions();
+}
+
+async function loadModels(refresh = false) {
+  const data = await api(`/api/models${refresh ? "?refresh=1" : ""}`);
+  modelsCache = data;
+  rebuildModelOptions();
   return data;
 }
-loadModels().catch(() => {}); // 启动时拉一次，失败就用 HTML 里写死的仨
+rebuildModelOptions();            // 先用写死的仨 + 手填的画出来，别等网络
+loadModels().catch(() => {});     // 再拉外部列表补上
 
 sendBtn.onclick = sendMessage;
 stopBtn.onclick = () => ws?.send(JSON.stringify({ type: "interrupt" }));

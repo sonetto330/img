@@ -117,25 +117,17 @@ export function externalRequest(): { baseUrl: string; headers: Record<string, st
   return { baseUrl: effectiveBaseUrl() || "https://api.anthropic.com", headers };
 }
 
-// —— 外部模型名的记账：/api/models 拉到什么就认什么，重启后第一次拉取前是空的 ——
-let knownExternalModels = new Set<string>();
-
-export function rememberExternalModels(ids: string[]): void {
-  knownExternalModels = new Set(ids);
-}
-
-export function isKnownExternalModel(id: string): boolean {
-  return knownExternalModels.has(id);
-}
-
 /**
  * 这一轮实际该用哪个模型：
- * 订阅通道原样；外部通道下，用户明确点的是外部列表里的模型就尊重，
- * 否则换成设置页配的"外部对话模型"（没配就原样传，兼容模型名跟官方一致的中转）
+ * 订阅通道原样；外部通道下只把"订阅系的叫法"（仨别名和 CLAUDE_MODEL 默认款）
+ * 换成设置页配的"外部对话模型"——用户点的外部列表模型、手填的具体型号都原样尊重
  */
 export function modelForChannel(useApi: boolean, requested: string): string {
   if (!useApi) return requested;
-  if (isKnownExternalModel(requested)) return requested;
+  const subscriptionish =
+    ["opus", "sonnet", "haiku"].includes(requested) ||
+    requested === (process.env.CLAUDE_MODEL || "claude-opus-4-7");
+  if (!subscriptionish) return requested;
   return getSettings().externalModel || requested;
 }
 
