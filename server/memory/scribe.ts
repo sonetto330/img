@@ -3,7 +3,7 @@ import { fileURLToPath } from "node:url";
 import { query } from "@anthropic-ai/claude-agent-sdk";
 import type { SessionRecord } from "../sessions.js";
 import { getDb } from "./db.js";
-import { channelEnv, looksLikeLimitError, withChannelFallback } from "../settings.js";
+import { channelEnv, looksLikeLimitError, stderrLogger, withChannelFallback } from "../settings.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const root = path.join(here, "..", "..");
@@ -112,7 +112,7 @@ ${existingList}
         maxTurns: 1,
         systemPrompt: { type: "preset", preset: "claude_code", append: `\n${systemPrompt}` },
         env: channelEnv(useApi),
-        stderr: (data) => console.error(`[scribe.haiku] ${data}`),
+        stderr: stderrLogger("scribe.haiku"),
       },
     });
     const textParts: string[] = [];

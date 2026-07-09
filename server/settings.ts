@@ -13,9 +13,14 @@ const FILE = path.join(DATA_DIR, "settings.json");
  * - auto：订阅优先，订阅报额度类错误时自动换外部 API 重试一次
  */
 export type Channel = "subscription" | "api" | "auto";
+export type ExternalAuth = "x-api-key" | "bearer";
 
 interface Settings {
   channel: Channel;
+  /** 外部 API 配置：设置页填的存这里（data/ 在 .gitignore 里）；没填就用 .env 里的兜底 */
+  externalKey?: string;
+  externalBaseUrl?: string;
+  externalAuth?: ExternalAuth;
 }
 
 const DEFAULTS: Settings = { channel: "subscription" };
@@ -33,17 +38,59 @@ export function getSettings(): Settings {
   return cached!;
 }
 
-export function setChannel(channel: Channel): Settings {
-  const s = { ...getSettings(), channel };
+function save(s: Settings): Settings {
   fs.mkdirSync(DATA_DIR, { recursive: true });
-  fs.writeFileSync(FILE, JSON.stringify(s, null, 2));
+  // 里面有 key，文件权限收紧到只有本用户可读（Windows 上此参数无效，无妨）
+  fs.writeFileSync(FILE, JSON.stringify(s, null, 2), { mode: 0o600 });
   cached = s;
   return s;
 }
 
-/** 外部 API 是否已配置（key 只放 .env，绝不进 settings.json） */
+export function setChannel(channel: Channel): Settings {
+  return save({ ...getSettings(), channel });
+}
+
+/** 设置页改外部 API 配置：传空字符串 = 清掉设置页的值、回退到 .env 里的 */
+export function setExternal(patch: { key?: string; baseUrl?: string; auth?: ExternalAuth | "" }): Settings {
+  const s = { ...getSettings() };
+  if (patch.key !== undefined) s.externalKey = patch.key.trim() || undefined;
+  if (patch.baseUrl !== undefined) s.externalBaseUrl = patch.baseUrl.trim() || undefined;
+  if (patch.auth !== undefined) s.externalAuth = patch.auth || undefined;
+  return save(s);
+}
+
+/** 生效的外部 key：设置页填的优先，其次 .env */
+function effectiveKey(): string {
+  return (getSettings().externalKey || process.env.EXTERNAL_API_KEY || "").trim();
+}
+
+function effectiveBaseUrl(): string {
+  return (getSettings().externalBaseUrl || process.env.EXTERNAL_API_BASE_URL || "").trim();
+}
+
+function effectiveAuth(): ExternalAuth {
+  const s = getSettings().externalAuth;
+  if (s) return s;
+  return process.env.EXTERNAL_API_AUTH === "bearer" ? "bearer" : "x-api-key";
+}
+
+/** 外部 API 是否已配置（设置页或 .env 任一处有 key 即可） */
 export function externalConfigured(): boolean {
-  return Boolean(process.env.EXTERNAL_API_KEY);
+  return Boolean(effectiveKey());
+}
+
+/** 给设置页 GET 用的回显：key 本身绝不回传，只给个掐头的尾巴确认"配了哪个" */
+export function publicSettings() {
+  const s = getSettings();
+  const key = effectiveKey();
+  return {
+    channel: s.channel,
+    externalConfigured: Boolean(key),
+    keyTail: key ? `…${key.slice(-4)}` : "",
+    keySource: s.externalKey ? "settings" : key ? "env" : "",
+    externalBaseUrl: effectiveBaseUrl(),
+    externalAuth: effectiveAuth(),
+  };
 }
 
 /**
@@ -54,11 +101,11 @@ export function externalConfigured(): boolean {
  */
 export function channelEnv(useApi: boolean): Record<string, string | undefined> | undefined {
   if (!useApi) return undefined;
-  const key = process.env.EXTERNAL_API_KEY;
+  const key = effectiveKey();
   if (!key) return undefined;
   const env: Record<string, string | undefined> = { ...process.env };
-  // 多数中转站兼容 Anthropic 的 x-api-key 头（默认）；只认 Bearer 的配 EXTERNAL_API_AUTH=bearer
-  if (process.env.EXTERNAL_API_AUTH === "bearer") {
+  // 多数中转站兼容 Anthropic 的 x-api-key 头（默认）；只认 Bearer 的切 bearer
+  if (effectiveAuth() === "bearer") {
     env.ANTHROPIC_AUTH_TOKEN = key;
     delete env.ANTHROPIC_API_KEY;
   } else {
@@ -66,15 +113,26 @@ export function channelEnv(useApi: boolean): Record<string, string | undefined> 
     delete env.ANTHROPIC_AUTH_TOKEN;
   }
   // 中转站/自定义接入点
-  if (process.env.EXTERNAL_API_BASE_URL) {
-    env.ANTHROPIC_BASE_URL = process.env.EXTERNAL_API_BASE_URL;
-  }
+  const baseUrl = effectiveBaseUrl();
+  if (baseUrl) env.ANTHROPIC_BASE_URL = baseUrl;
   return env;
 }
 
 /** 当前设置下，一次普通调用该不该走外部 API（auto 的重试逻辑在调用方） */
 export function useApiNow(): boolean {
   return getSettings().channel === "api" && externalConfigured();
+}
+
+/**
+ * CLI 子进程 stderr 的统一日志出口。
+ * 外部 API 通道下 CLI 会提醒 "connectors are disabled"（API key 优先于 claude.ai 登录，
+ * 账号上挂的工具加载不了）——这是预期行为不是故障，过滤掉别刷屏。
+ */
+export function stderrLogger(tag: string): (data: string) => void {
+  return (data) => {
+    if (data.includes("connectors are disabled")) return;
+    console.error(`[${tag}] ${data}`);
+  };
 }
 
 /** 订阅额度耗尽的报错长这样（CLI 的英文提示），auto 模式靠它决定要不要换通道重试 */

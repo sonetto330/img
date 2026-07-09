@@ -175,6 +175,26 @@
           <span class="channel-text"><b>外部 API</b><small>直接按量计费，把订阅额度留给别处</small></span>
         </label>
       </div>
+
+      <div class="settings-group ext-group">
+        <div class="settings-head">外部 API 配置</div>
+        <div class="settings-sub" id="externalStatus">读取中…</div>
+        <div class="ext-field">
+          <label for="extKey">API key</label>
+          <input type="password" id="extKey" autocomplete="off" placeholder="读取中…" />
+          <small>只存在服务器上，保存后不回显；重新填一遍就是覆盖</small>
+        </div>
+        <div class="ext-field">
+          <label for="extBaseUrl">中转地址</label>
+          <input type="url" id="extBaseUrl" autocomplete="off" placeholder="https://…（用官方 API 就留空）" />
+          <small>一般填到根地址、不带 /v1 结尾；不通再按中转文档原样填</small>
+        </div>
+        <label class="ext-check">
+          <input type="checkbox" id="extBearer" />
+          <span class="channel-text"><b>这个中转只认 Bearer 验证</b><small>key 确定没错还报 401 时勾上再试</small></span>
+        </label>
+        <button id="extSave" class="ext-save" type="button">保存</button>
+      </div>
     </div>
   </section>
 

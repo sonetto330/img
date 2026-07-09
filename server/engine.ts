@@ -1,4 +1,5 @@
 import { query, type Options } from "@anthropic-ai/claude-agent-sdk";
+import { stderrLogger } from "./settings.js";
 
 export interface ToolCall {
   name: string;
@@ -94,7 +95,7 @@ export function runTurn(opts: TurnOptions, cb: TurnCallbacks): TurnHandle {
         append,
       },
       // 引擎报错时把详细原因打到服务端控制台，方便排查
-      stderr: (data) => console.error(`[engine] ${data}`),
+      stderr: stderrLogger("engine"),
     },
   });
 

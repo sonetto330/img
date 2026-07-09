@@ -783,6 +783,29 @@ footer textarea::placeholder { color: var(--muted); opacity: .75; }
 .channel-text b { font-size: 14px; color: var(--ink); font-weight: 600; letter-spacing: 1px; }
 .channel-text small { font-size: 11.5px; color: var(--muted); letter-spacing: .5px; }
 
+/* 外部 API 配置 */
+.ext-group { margin-top: 14px; }
+.ext-field { display: flex; flex-direction: column; gap: 5px; padding: 10px 0; border-top: 1px solid var(--line); }
+.ext-field label { font-family: var(--kai); font-size: 13px; color: var(--ink); letter-spacing: 1px; }
+.ext-field input {
+  font-size: 13px; padding: 9px 11px; border: 1px solid var(--line); border-radius: 10px;
+  background: transparent; color: var(--ink); outline: none;
+}
+.ext-field input:focus { border-color: var(--accent); }
+.ext-field small { font-family: var(--kai); font-size: 11px; color: var(--muted); letter-spacing: .5px; line-height: 1.5; }
+.ext-check {
+  display: flex; align-items: flex-start; gap: 10px;
+  padding: 12px 0; border-top: 1px solid var(--line); cursor: pointer;
+}
+.ext-check input { margin-top: 3px; accent-color: var(--accent); }
+.ext-save {
+  width: 100%; margin-top: 4px; padding: 10px;
+  font-family: var(--kai); font-size: 14px; letter-spacing: 4px;
+  color: var(--ink); background: transparent;
+  border: 1px solid var(--line); border-radius: 10px; cursor: pointer;
+}
+.ext-save:active { background: var(--line); }
+
 /* 聊天里的通道切换提示：跟时间戳一样的居中小字 */
 .chan-note {
   align-self: center; text-align: center;

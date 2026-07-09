@@ -1037,9 +1037,10 @@ document.addEventListener("touchend", (e) => {
   lastTouchEnd = now;
 }, { passive: false });
 
-// —— 设置页：调用通道 ——
+// —— 设置页：调用通道 + 外部 API 配置 ——
 async function loadChannelSettings() {
   const statusEl = $("channelStatus");
+  const extStatusEl = $("externalStatus");
   try {
     const s = await api("/api/settings");
     for (const input of settingsViewEl.querySelectorAll("input[name=channel]")) {
@@ -1048,24 +1049,36 @@ async function loadChannelSettings() {
       input.disabled = input.value !== "subscription" && !s.externalConfigured;
     }
     statusEl.textContent = s.externalConfigured
-      ? "外部 API key 已配置（服务器 .env）"
-      : "外部 API 还没配置：在服务器 .env 填 EXTERNAL_API_KEY 后重启，另外两项才能选";
+      ? `外部 API key 已配置（${s.keySource === "settings" ? "本页保存的" : "服务器 .env 里的"}，尾号 ${s.keyTail}）`
+      : "外部 API 还没配置：在下面填好 key 保存，另外两项才能选";
+    // key 不回显，占位符提示当前状态；地址和验证方式正常回填
+    $("extKey").value = "";
+    $("extKey").placeholder = s.externalConfigured ? `已配置（尾号 ${s.keyTail}），要换就填新的` : "sk-…（中转站或官方的 key）";
+    $("extBaseUrl").value = s.externalBaseUrl || "";
+    $("extBearer").checked = s.externalAuth === "bearer";
+    extStatusEl.textContent = "改完点保存，立即生效，不用重启服务";
   } catch {
     statusEl.textContent = "设置读不到，稍后再试";
+    extStatusEl.textContent = "设置读不到，稍后再试";
   }
+}
+
+async function postSettings(body) {
+  const res = await fetch(`/api/settings?token=${encodeURIComponent(token)}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || "保存失败");
+  return data;
 }
 
 for (const input of settingsViewEl.querySelectorAll("input[name=channel]")) {
   input.onchange = async () => {
     const statusEl = $("channelStatus");
     try {
-      const res = await fetch(`/api/settings?token=${encodeURIComponent(token)}`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ channel: input.value }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "保存失败");
+      await postSettings({ channel: input.value });
       statusEl.textContent = "已保存";
       setTimeout(loadChannelSettings, 1200);
     } catch (err) {
@@ -1074,6 +1087,25 @@ for (const input of settingsViewEl.querySelectorAll("input[name=channel]")) {
     }
   };
 }
+
+$("extSave").onclick = async () => {
+  const extStatusEl = $("externalStatus");
+  const body = {
+    externalBaseUrl: $("extBaseUrl").value.trim(),
+    externalAuth: $("extBearer").checked ? "bearer" : "x-api-key",
+  };
+  // key 框留空 = 不动现有的 key；填了才覆盖
+  const key = $("extKey").value.trim();
+  if (key) body.externalKey = key;
+  try {
+    extStatusEl.textContent = "保存中…";
+    await postSettings(body);
+    extStatusEl.textContent = "已保存，立即生效";
+    setTimeout(loadChannelSettings, 1200);
+  } catch (err) {
+    extStatusEl.textContent = err.message || "保存失败";
+  }
+};
 
 // —— 通话 ——
 const callOverlayEl = $("callOverlay");

@@ -20,7 +20,7 @@ import { getGraph, getEntityDetail, getCoreDetail } from "./memory/graph.js";
 import { loadPersona } from "./persona.js";
 import { getGreeting } from "./greeting.js";
 import { translateThinking } from "./translate.js";
-import { getSettings, setChannel, channelEnv, externalConfigured, useApiNow, looksLikeLimitError, type Channel } from "./settings.js";
+import { getSettings, setChannel, setExternal, publicSettings, channelEnv, externalConfigured, useApiNow, looksLikeLimitError, type Channel } from "./settings.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const root = path.join(here, "..");
@@ -151,31 +151,53 @@ const server = http.createServer((req, res) => {
     return;
   }
 
-  // 设置：调用通道（订阅 / 外部API / 自动），key 只认 .env，接口绝不回传（需要口令）
+  // 设置：调用通道（订阅 / 外部API / 自动）+ 外部 API 配置。
+  // key 存 data/settings.json（.gitignore 内），GET 绝不回传 key 本身，只回尾巴四位（需要口令）
   if (url.pathname === "/api/settings") {
     if (!authed(url)) return sendJson(res, 401, { error: "口令不对" });
     if (req.method === "POST") {
       const chunks: Buffer[] = [];
       req.on("data", (c: Buffer) => chunks.push(c));
       req.on("end", () => {
-        let body: { channel?: string };
+        let body: { channel?: string; externalKey?: string; externalBaseUrl?: string; externalAuth?: string };
         try {
           body = JSON.parse(Buffer.concat(chunks).toString("utf8") || "{}");
         } catch {
           return sendJson(res, 400, { error: "消息格式不对" });
         }
-        const channel = body.channel as Channel;
-        if (!["subscription", "api", "auto"].includes(channel)) {
-          return sendJson(res, 400, { error: "没有这个通道" });
+        // 先存外部 API 配置（有哪项动哪项），再切通道——这样"填 key + 选自动"能一次保存
+        if (body.externalKey !== undefined || body.externalBaseUrl !== undefined || body.externalAuth !== undefined) {
+          if (body.externalKey !== undefined && (typeof body.externalKey !== "string" || body.externalKey.length > 300)) {
+            return sendJson(res, 400, { error: "key 格式不对" });
+          }
+          const baseUrl = body.externalBaseUrl?.trim();
+          if (baseUrl && !/^https?:\/\//.test(baseUrl)) {
+            return sendJson(res, 400, { error: "中转地址要以 http:// 或 https:// 开头" });
+          }
+          if (body.externalAuth !== undefined && !["", "x-api-key", "bearer"].includes(body.externalAuth)) {
+            return sendJson(res, 400, { error: "验证方式只有 x-api-key 和 bearer 两种" });
+          }
+          setExternal({
+            key: body.externalKey,
+            baseUrl: body.externalBaseUrl,
+            auth: body.externalAuth as "x-api-key" | "bearer" | "" | undefined,
+          });
         }
-        if (channel !== "subscription" && !externalConfigured()) {
-          return sendJson(res, 400, { error: "外部 API 还没配置：先在服务器 .env 里填 EXTERNAL_API_KEY，重启服务" });
+        if (body.channel !== undefined) {
+          const channel = body.channel as Channel;
+          if (!["subscription", "api", "auto"].includes(channel)) {
+            return sendJson(res, 400, { error: "没有这个通道" });
+          }
+          if (channel !== "subscription" && !externalConfigured()) {
+            return sendJson(res, 400, { error: "先把外部 API key 填上保存，才能选这两项" });
+          }
+          setChannel(channel);
         }
-        return sendJson(res, 200, { ...setChannel(channel), externalConfigured: externalConfigured() });
+        return sendJson(res, 200, publicSettings());
       });
       return;
     }
-    return sendJson(res, 200, { ...getSettings(), externalConfigured: externalConfigured() });
+    return sendJson(res, 200, publicSettings());
   }
 
   // 语音通话：一轮 = 收音频 → 转文字 → 麦穗说话 → 合成语音（需要口令）

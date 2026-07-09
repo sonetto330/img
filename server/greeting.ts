@@ -4,7 +4,7 @@ import { query } from "@anthropic-ai/claude-agent-sdk";
 import { loadPersona } from "./persona.js";
 import { getWeather } from "./weather.js";
 import { getDb } from "./memory/db.js";
-import { channelEnv, looksLikeLimitError, withChannelFallback } from "./settings.js";
+import { channelEnv, looksLikeLimitError, stderrLogger, withChannelFallback } from "./settings.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const root = path.join(here, "..");
@@ -60,7 +60,7 @@ ${memories}
             : `\n${contextBlock}`,
         },
         env: channelEnv(useApi),
-        stderr: (data) => console.error(`[greeting.haiku] ${data}`),
+        stderr: stderrLogger("greeting.haiku"),
       },
     });
     const parts: string[] = [];
