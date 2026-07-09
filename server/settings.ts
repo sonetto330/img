@@ -56,11 +56,16 @@ export function channelEnv(useApi: boolean): Record<string, string | undefined> 
   if (!useApi) return undefined;
   const key = process.env.EXTERNAL_API_KEY;
   if (!key) return undefined;
-  const env: Record<string, string | undefined> = {
-    ...process.env,
-    ANTHROPIC_API_KEY: key,
-  };
-  // 中转站之类的自定义接入点，可选
+  const env: Record<string, string | undefined> = { ...process.env };
+  // 多数中转站兼容 Anthropic 的 x-api-key 头（默认）；只认 Bearer 的配 EXTERNAL_API_AUTH=bearer
+  if (process.env.EXTERNAL_API_AUTH === "bearer") {
+    env.ANTHROPIC_AUTH_TOKEN = key;
+    delete env.ANTHROPIC_API_KEY;
+  } else {
+    env.ANTHROPIC_API_KEY = key;
+    delete env.ANTHROPIC_AUTH_TOKEN;
+  }
+  // 中转站/自定义接入点
   if (process.env.EXTERNAL_API_BASE_URL) {
     env.ANTHROPIC_BASE_URL = process.env.EXTERNAL_API_BASE_URL;
   }
