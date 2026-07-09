@@ -681,10 +681,28 @@ function isTechnicalSession(s) {
   return tools / total >= 0.3;
 }
 
+// 文件夹折叠状态记在本机；默认折叠（整理进文件夹的多半是旧会话，收着省地方）
+function collapsedFolders() {
+  try {
+    const v = JSON.parse(localStorage.getItem("home_folders_open") || "[]");
+    return Array.isArray(v) ? new Set(v) : new Set();
+  } catch {
+    return new Set();
+  }
+}
+function toggleFolder(name) {
+  const open = collapsedFolders();
+  if (open.has(name)) open.delete(name);
+  else open.add(name);
+  localStorage.setItem("home_folders_open", JSON.stringify([...open]));
+}
+
+let sessionsCache = [];
+
 async function loadSessions() {
-  const sessions = await api("/api/sessions");
+  sessionsCache = await api("/api/sessions");
   // 首页消息总数**只算聊天会话**，技术会话（我改代码那种）不计
-  const chatTotal = sessions
+  const chatTotal = sessionsCache
     .filter((s) => !isTechnicalSession(s))
     .reduce((n, s) => n + (s.messageCount || 0), 0);
   const row = $("msgCountRow");
@@ -698,39 +716,81 @@ async function loadSessions() {
       $("msgCountUnit").textContent = "条消息 · 全部聊天";
     }
   }
+  renderSessions();
+}
+
+// 画会话列表：散装的按时间在上，文件夹收在底部（折叠状态记本机，点行头开合）
+function renderSessions() {
   listEl.innerHTML = "";
-  for (const s of sessions) {
-    const li = document.createElement("li");
-    const info = document.createElement("div");
-    info.className = "sess-info";
-    const title = document.createElement("div");
-    title.className = "sess-title";
-    title.textContent = s.title;
-    if (isTechnicalSession(s)) {
-      const tag = document.createElement("span");
-      tag.className = "sess-tag";
-      tag.textContent = "技术";
-      title.appendChild(tag);
-    }
-    const t = document.createElement("time");
-    t.textContent = new Date(s.updatedAt).toLocaleString("zh-CN");
-    info.append(title, t);
-    li.appendChild(info);
-
-    const more = document.createElement("button");
-    more.className = "sess-more";
-    more.textContent = "⋯";
-    more.setAttribute("aria-label", "更多");
-    more.onclick = (e) => {
-      e.stopPropagation();
-      openSessMenu(s, li);
-    };
-    li.appendChild(more);
-
-    if (s.id === sessionId) li.classList.add("active");
-    li.onclick = () => openSession(s.id);
-    listEl.appendChild(li);
+  const loose = sessionsCache.filter((s) => !s.folder);
+  const folders = new Map();
+  for (const s of sessionsCache) {
+    if (!s.folder) continue;
+    if (!folders.has(s.folder)) folders.set(s.folder, []);
+    folders.get(s.folder).push(s);
   }
+  for (const s of loose) listEl.appendChild(sessionRow(s));
+  const open = collapsedFolders();
+  for (const [name, items] of [...folders.entries()].sort((a, b) => a[0].localeCompare(b[0], "zh-CN"))) {
+    const li = document.createElement("li");
+    li.className = "folder-row";
+    const isOpen = open.has(name);
+    const arrow = document.createElement("span");
+    arrow.className = "folder-arrow";
+    arrow.textContent = isOpen ? "▾" : "▸";
+    const label = document.createElement("span");
+    label.className = "folder-name";
+    label.textContent = `📁 ${name}`;
+    const count = document.createElement("span");
+    count.className = "folder-count";
+    count.textContent = items.length;
+    li.append(arrow, label, count);
+    li.onclick = () => {
+      toggleFolder(name);
+      renderSessions();
+    };
+    listEl.appendChild(li);
+    if (isOpen) {
+      for (const s of items) {
+        const row = sessionRow(s);
+        row.classList.add("in-folder");
+        listEl.appendChild(row);
+      }
+    }
+  }
+}
+
+function sessionRow(s) {
+  const li = document.createElement("li");
+  const info = document.createElement("div");
+  info.className = "sess-info";
+  const title = document.createElement("div");
+  title.className = "sess-title";
+  title.textContent = s.title;
+  if (isTechnicalSession(s)) {
+    const tag = document.createElement("span");
+    tag.className = "sess-tag";
+    tag.textContent = "技术";
+    title.appendChild(tag);
+  }
+  const t = document.createElement("time");
+  t.textContent = new Date(s.updatedAt).toLocaleString("zh-CN");
+  info.append(title, t);
+  li.appendChild(info);
+
+  const more = document.createElement("button");
+  more.className = "sess-more";
+  more.textContent = "⋯";
+  more.setAttribute("aria-label", "更多");
+  more.onclick = (e) => {
+    e.stopPropagation();
+    openSessMenu(s, li);
+  };
+  li.appendChild(more);
+
+  if (s.id === sessionId) li.classList.add("active");
+  li.onclick = () => openSession(s.id);
+  return li;
 }
 
 // —— 会话行操作菜单 ——
@@ -750,6 +810,13 @@ function openSessMenu(sess, anchor) {
     closeSessMenu();
     doRename(sess);
   };
+  const move = document.createElement("button");
+  move.textContent = sess.folder ? `移出「${sess.folder}」` : "移动到…";
+  move.onclick = (e) => {
+    e.stopPropagation();
+    closeSessMenu();
+    doMove(sess);
+  };
   const del = document.createElement("button");
   del.className = "danger";
   del.textContent = "删除";
@@ -758,7 +825,7 @@ function openSessMenu(sess, anchor) {
     closeSessMenu();
     doDelete(sess);
   };
-  menu.append(rename, del);
+  menu.append(rename, move, del);
   anchor.appendChild(menu);
   openMenu = menu;
   // 点别处关掉
@@ -774,6 +841,24 @@ async function doRename(sess) {
     body: JSON.stringify({ title }),
   });
   if (!res.ok) return addBubble("error", "改名失败");
+  loadSessions();
+}
+
+async function doMove(sess) {
+  let folder = "";
+  if (!sess.folder) {
+    // 移进：列出已有文件夹让她照抄，或直接输新名字建新的
+    const existing = [...new Set(sessionsCache.map((s) => s.folder).filter(Boolean))];
+    const hint = existing.length ? `已有文件夹：${existing.join("、")}\n输入其中一个归进去，或输新名字新建` : "输入文件夹名（没有会自动新建）";
+    folder = (prompt(hint) || "").trim();
+    if (!folder) return;
+  }
+  const res = await fetch(`/api/sessions/${sess.id}/folder?token=${encodeURIComponent(token)}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ folder }),
+  });
+  if (!res.ok) return addBubble("error", "移动失败");
   loadSessions();
 }
 

@@ -384,6 +384,17 @@ footer textarea::placeholder { color: var(--muted); opacity: .75; }
   font-size: 20px; line-height: 1; padding: 4px 8px; cursor: pointer; border-radius: 6px;
 }
 .drawer li .sess-more:hover, .drawer li .sess-more:active { background: var(--bg); color: var(--ink); }
+/* 文件夹行：点击开合，箭头 + 名字 + 计数 */
+.drawer li.folder-row { font-family: var(--kai); letter-spacing: 1px; }
+.folder-arrow { flex: none; width: 14px; color: var(--muted); font-size: 12px; }
+.folder-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.folder-count {
+  flex: none; font-size: 11px; color: var(--muted);
+  background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 1px 7px;
+}
+/* 文件夹里的会话行往里缩一点，看得出层级 */
+.drawer li.in-folder { padding-left: 34px; }
+
 .sess-menu {
   position: absolute; top: 44px; right: 10px; z-index: 30;
   background: var(--panel); border: 1px solid var(--line); border-radius: 10px;

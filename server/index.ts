@@ -438,6 +438,26 @@ const server = http.createServer((req, res) => {
     });
     return;
   }
+  // 挪文件夹：folder 传空串 = 移出文件夹
+  const folderMatch = url.pathname.match(/^\/api\/sessions\/([0-9a-f-]{36})\/folder$/);
+  if (folderMatch && req.method === "POST") {
+    if (!authed(url)) return sendJson(res, 401, { error: "口令不对" });
+    const chunks: Buffer[] = [];
+    req.on("data", (c: Buffer) => chunks.push(c));
+    req.on("end", () => {
+      let body: { folder?: string };
+      try {
+        body = JSON.parse(Buffer.concat(chunks).toString("utf8") || "{}");
+      } catch {
+        return sendJson(res, 400, { error: "消息格式不对" });
+      }
+      const record = store.setFolder(folderMatch[1], String(body.folder ?? ""));
+      return record
+        ? sendJson(res, 200, { id: record.id, folder: record.folder ?? "" })
+        : sendJson(res, 404, { error: "没有这个会话" });
+    });
+    return;
+  }
 
   // 静态文件
   const rel = url.pathname === "/" ? "index.html" : url.pathname.slice(1);

@@ -26,6 +26,8 @@ export interface SessionRecord {
   title: string;
   /** 会话所属模式；旧数据无此字段按 chat 处理，会话建成后不改 */
   mode: string;
+  /** 所属文件夹名；空/缺省 = 不在任何文件夹。一层结构，不嵌套 */
+  folder?: string;
   claudeSessionId?: string;
   createdAt: string;
   updatedAt: string;
@@ -93,8 +95,19 @@ export class SessionStore {
     return record;
   }
 
-  list(): Array<Pick<SessionRecord, "id" | "title" | "mode" | "updatedAt"> & { messageCount: number; toolMessageCount: number }> {
-    const out: Array<Pick<SessionRecord, "id" | "title" | "mode" | "updatedAt"> & { messageCount: number; toolMessageCount: number }> = [];
+  /** 挪进/挪出文件夹：folder 传空串就是移出。整理动作不该把会话顶到列表最上面，所以不动 updatedAt */
+  setFolder(id: string, folder: string): SessionRecord | null {
+    const record = this.get(id);
+    if (!record) return null;
+    const clean = folder.trim().slice(0, 30);
+    if (clean) record.folder = clean;
+    else delete record.folder;
+    fs.writeFileSync(this.file(record.id), JSON.stringify(record, null, 2));
+    return record;
+  }
+
+  list(): Array<Pick<SessionRecord, "id" | "title" | "mode" | "updatedAt" | "folder"> & { messageCount: number; toolMessageCount: number }> {
+    const out: Array<Pick<SessionRecord, "id" | "title" | "mode" | "updatedAt" | "folder"> & { messageCount: number; toolMessageCount: number }> = [];
     for (const name of fs.readdirSync(this.dir)) {
       if (!name.endsWith(".json")) continue;
       const record = this.get(name.slice(0, -5));
@@ -108,6 +121,7 @@ export class SessionStore {
         id: record.id,
         title: record.title,
         mode: record.mode,
+        folder: record.folder,
         updatedAt: record.updatedAt,
         messageCount: record.messages.length,
         toolMessageCount,
