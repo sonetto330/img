@@ -448,14 +448,15 @@ footer textarea::placeholder { color: var(--muted); opacity: .75; }
 .hero { position: relative; margin-bottom: 0; min-height: 350px; }
 .hero-fox {
   position: absolute; right: -20%; top: -96px;
-  width: 112%; max-width: 540px;
-  z-index: 0; pointer-events: none;
+  width: 128%; max-width: 540px;
+  /* 压在便签(z2)上面、天数文字(z4)下面：狐狸盖便签顶边，不盖字 */
+  z-index: 3; pointer-events: none;
   opacity: .96;
 }
-.hero-text { position: relative; z-index: 1; padding-top: 14px; }
+.hero-text { position: relative; z-index: 4; padding-top: 14px; }
 /* 角落的经纬度小字：攀枝花 + 杭州 */
 .hero-coords {
-  position: absolute; right: 44%; top: -46px; z-index: 2;
+  position: absolute; right: 44%; top: -46px; z-index: 5;
   text-align: right;
   font-family: "Canela", Georgia, serif;
   font-size: 9.5px; letter-spacing: 1.2px; color: var(--muted);
@@ -464,7 +465,7 @@ footer textarea::placeholder { color: var(--muted); opacity: .75; }
 /* 散落的小星星 */
 .spark { font-style: normal; color: var(--name); opacity: .7; }
 .spark.inline { font-size: 11px; vertical-align: 3px; }
-.spark.s1 { position: absolute; left: 46%; top: -20px; font-size: 12px; z-index: 2; }
+.spark.s1 { position: absolute; left: 46%; top: -20px; font-size: 12px; z-index: 5; }
 .spark.s2 { position: absolute; left: 2px; bottom: 6px; font-size: 10px; opacity: .5; }
 .since-label {
   font-family: "Canela", Georgia, serif;
@@ -493,11 +494,18 @@ footer textarea::placeholder { color: var(--muted); opacity: .75; }
   letter-spacing: 1px; margin-top: 6px;
 }
 
-/* —— 每日留言条：垫在泽找的便签纸素材上，上提盖住狐狸尾巴一角 —— */
+/* —— 每日留言条：垫在泽找的便签纸素材上，顶边塞到狐狸下面一点 ——
+   上提量跟屏宽联动：狐狸实画高度≈128%宽×89%（图底约11%透明），
+   目标是尾巴压住纸顶边约16px、离第一行字还有一指宽，各种手机都成立。
+   依赖 .hero 的 min-height:350px，改那边记得同步这里的常数 */
 .note-wrap {
   display: flex; gap: 4px; align-items: stretch;
-  margin: -64px -6px 24px 0;
+  margin: calc(112.8% - 462px) -6px 24px 0;
   position: relative; z-index: 2;
+}
+/* 屏幕一宽狐狸就到 540px 顶格不再长，上提量随之定死 */
+@media (min-width: 466px) {
+  .note-wrap { margin-top: 14px; }
 }
 .note-side {
   flex: none; width: 20px;
@@ -513,6 +521,7 @@ footer textarea::placeholder { color: var(--muted); opacity: .75; }
 }
 .note-card {
   position: relative; flex: 1;
+  max-width: 420px;
   aspect-ratio: 1632 / 1258;
   background: url("assets/notepaper.webp") no-repeat center / contain;
 }
