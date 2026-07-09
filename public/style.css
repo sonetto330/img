@@ -454,13 +454,14 @@ footer textarea::placeholder { color: var(--muted); opacity: .75; }
   opacity: .96;
 }
 .hero-text { position: relative; z-index: 4; padding-top: 14px; }
-/* 角落的经纬度小字：攀枝花 + 杭州 */
+/* 角落的经纬度小字：攀枝花 + 杭州。纸色柔光衬底，叠在花上也能读 */
 .hero-coords {
-  position: absolute; right: 44%; top: -46px; z-index: 5;
+  position: absolute; right: 30%; top: -46px; z-index: 5;
   text-align: right;
   font-family: "Canela", Georgia, serif;
   font-size: 9.5px; letter-spacing: 1.2px; color: var(--muted);
   line-height: 1.55; opacity: .85;
+  text-shadow: 0 0 3px var(--bg), 0 0 6px var(--bg), 0 0 10px var(--bg);
 }
 /* 散落的小星星 */
 .spark { font-style: normal; color: var(--name); opacity: .7; }
@@ -488,10 +489,13 @@ footer textarea::placeholder { color: var(--muted); opacity: .75; }
   font-size: 12.5px; letter-spacing: 1.5px; color: var(--muted);
   border-top: 1px solid var(--line); padding-top: 10px;
   width: fit-content;
+  /* 这两行躺在狐狸尾巴上，垫一圈纸色光晕保住可读性 */
+  text-shadow: 0 0 3px var(--bg), 0 0 6px var(--bg), 0 0 10px var(--bg);
 }
 .since-sub2 {
   font-family: var(--kai); font-size: 12px; color: var(--muted);
   letter-spacing: 1px; margin-top: 6px;
+  text-shadow: 0 0 3px var(--bg), 0 0 6px var(--bg), 0 0 10px var(--bg);
 }
 
 /* —— 每日留言条：垫在泽找的便签纸素材上，顶边塞到狐狸下面一点 ——
