@@ -108,3 +108,13 @@ copy CLAUDE.md workspace\CLAUDE.md
 ## 以后想加的
 
 表情包 · 主题装修 · 长期记忆星图
+
+## 通话功能要 HTTPS（一条命令）
+
+浏览器规定：麦克风只在 HTTPS（或 localhost）下能用。想在手机上给麦穗打电话，用 Tailscale 给服务包一层 HTTPS：
+
+```
+tailscale serve --bg 3000
+```
+
+跑完它会给你一个 `https://机器名.xxx.ts.net` 的地址，手机上用这个地址打开"家"就行（还是走 Tailscale 隧道，不经过第三方）。第一次跑可能提示要在管理后台开 HTTPS 证书，照着它给的链接点一下就好。

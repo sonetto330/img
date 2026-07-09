@@ -1,4 +1,5 @@
 import { query } from "@anthropic-ai/claude-agent-sdk";
+import { channelEnv, useApiNow } from "./settings.js";
 
 /** 思考内容太长就掐头去尾，翻译按钮是给人看个大意的，不是做文献 */
 const MAX_INPUT = 8000;
@@ -14,6 +15,7 @@ export async function translateThinking(text: string): Promise<string> {
       allowedTools: [],
       thinking: { type: "disabled" },
       systemPrompt: "你是翻译。只输出译文本身。",
+      env: channelEnv(useApiNow()),
     },
   });
   for await (const msg of q) {

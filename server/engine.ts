@@ -50,6 +50,11 @@ export interface TurnOptions {
   thinking?: boolean;
   /** 当前时间的人话字符串，注入系统提示，让他知道现在几点 */
   now?: string;
+  /**
+   * 传给 CLI 子进程的完整环境变量（settings.channelEnv 算出来的）。
+   * 不传就继承 process.env（订阅通道）；传了就是外部 API 通道。
+   */
+  env?: Record<string, string | undefined>;
 }
 
 export function runTurn(opts: TurnOptions, cb: TurnCallbacks): TurnHandle {
@@ -82,6 +87,7 @@ export function runTurn(opts: TurnOptions, cb: TurnCallbacks): TurnHandle {
       thinking: opts.thinking ? { type: "adaptive", display: "summarized" } : undefined,
       mcpServers: opts.mcpServers,
       allowedTools: opts.allowedTools,
+      env: opts.env,
       systemPrompt: {
         type: "preset",
         preset: "claude_code",

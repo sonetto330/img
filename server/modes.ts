@@ -37,6 +37,8 @@ export interface ModeDef {
  */
 const MODES: Record<string, ModeDef> = {
   chat: { id: "chat", label: "聊天" },
+  // 语音通话：不走 WS 聊天流，由 /api/call/turn 单独驱动，提示词管住"说话"的分寸
+  call: { id: "call", label: "通话", promptFile: "call.md" },
 };
 
 /** 未知的模式一律回落到 chat，避免拼错字段让麦穗不知道自己在哪 */

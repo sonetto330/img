@@ -94,6 +94,15 @@ function handle(msg) {
       loadSessions();
       break;
     }
+    case "channel_fallback": {
+      // 订阅额度用完，服务端换外部 API 重打这一轮；插一行居中小字说明
+      const note = document.createElement("div");
+      note.className = "chan-note";
+      note.textContent = "订阅额度用完，这条走外部 API";
+      messagesEl.appendChild(note);
+      scrollDown();
+      break;
+    }
     case "error":
       if (msg.message === "口令不对") {
         localStorage.removeItem("home_token");
@@ -825,19 +834,24 @@ maskEl.onclick = closeDrawer;
 const homeViewEl = $("homeView");
 const chatViewEl = $("chatView");
 const memoryViewEl = $("memoryView");
+const toolsViewEl = $("toolsView");
+const settingsViewEl = $("settingsView");
 const bottomNavEl = $("bottomNav");
 
 function showView(name) {
   homeViewEl.hidden = name !== "home";
   chatViewEl.hidden = name !== "chat";
   memoryViewEl.hidden = name !== "memory";
-  // 聊天和星图都要占满屏，底部导航让位；首页导航常驻
+  toolsViewEl.hidden = name !== "tools";
+  settingsViewEl.hidden = name !== "settings";
+  // 聊天和星图都要占满屏，底部导航让位；首页/工具/设置导航常驻
   bottomNavEl.hidden = name === "chat" || name === "memory";
   for (const btn of bottomNavEl.querySelectorAll(".nav-btn")) {
     btn.classList.toggle("active", btn.dataset.view === name);
   }
   if (name === "home") updateGreeting();
   if (name === "memory") loadMemoryGraph();
+  if (name === "settings") loadChannelSettings();
   if (name === "chat") {
     // 视图刚显示，浏览器还没做布局，scrollHeight 可能是 0。
     // 等一帧让布局完成再贴底，否则永远停在顶。
@@ -1022,6 +1036,184 @@ document.addEventListener("touchend", (e) => {
   if (now - lastTouchEnd <= 300) e.preventDefault();
   lastTouchEnd = now;
 }, { passive: false });
+
+// —— 设置页：调用通道 ——
+async function loadChannelSettings() {
+  const statusEl = $("channelStatus");
+  try {
+    const s = await api("/api/settings");
+    for (const input of settingsViewEl.querySelectorAll("input[name=channel]")) {
+      input.checked = input.value === s.channel;
+      // 外部 key 没配就只剩订阅能选
+      input.disabled = input.value !== "subscription" && !s.externalConfigured;
+    }
+    statusEl.textContent = s.externalConfigured
+      ? "外部 API key 已配置（服务器 .env）"
+      : "外部 API 还没配置：在服务器 .env 填 EXTERNAL_API_KEY 后重启，另外两项才能选";
+  } catch {
+    statusEl.textContent = "设置读不到，稍后再试";
+  }
+}
+
+for (const input of settingsViewEl.querySelectorAll("input[name=channel]")) {
+  input.onchange = async () => {
+    const statusEl = $("channelStatus");
+    try {
+      const res = await fetch(`/api/settings?token=${encodeURIComponent(token)}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ channel: input.value }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "保存失败");
+      statusEl.textContent = "已保存";
+      setTimeout(loadChannelSettings, 1200);
+    } catch (err) {
+      statusEl.textContent = err.message || "保存失败";
+      loadChannelSettings();
+    }
+  };
+}
+
+// —— 通话 ——
+const callOverlayEl = $("callOverlay");
+const callStatusEl = $("callStatus");
+const callTranscriptEl = $("callTranscript");
+const callTalkEl = $("callTalk");
+
+let callSession = null;     // 一通电话一个会话
+let callBusy = false;       // 这一轮还没回完
+let callRecorder = null;
+let callStream = null;
+let callChunks = [];
+let callTimerId = null;
+let callStartedAt = 0;
+// 单个 audio 元素反复用：第一次用户手势里 play 过之后，iOS 才允许后续程序化播放
+const callAudio = new Audio();
+
+// 挑一个当前浏览器录得出来的格式；iPhone 是 mp4/aac，桌面多是 webm/opus
+function pickMime() {
+  for (const m of ["audio/mp4", "audio/webm;codecs=opus", "audio/webm"]) {
+    if (window.MediaRecorder && MediaRecorder.isTypeSupported(m)) return m;
+  }
+  return "";
+}
+
+function callSetStatus(text) {
+  callStatusEl.textContent = text;
+}
+
+function callTick() {
+  const s = Math.floor((Date.now() - callStartedAt) / 1000);
+  const mm = String(Math.floor(s / 60)).padStart(2, "0");
+  const ss = String(s % 60).padStart(2, "0");
+  return `${mm}:${ss}`;
+}
+
+function callLine(who, text) {
+  const div = document.createElement("div");
+  div.className = `call-line ${who}`;
+  div.textContent = text;
+  callTranscriptEl.appendChild(div);
+  callTranscriptEl.scrollTop = callTranscriptEl.scrollHeight;
+}
+
+$("toolCall").onclick = async () => {
+  // 麦克风只在安全环境（https 或 localhost）能用，这是浏览器的硬规定
+  if (!window.isSecureContext) {
+    alert("打电话要用麦克风，浏览器要求 HTTPS 环境。\n用 tailscale serve 给服务包一层 HTTPS 就行（README 里有写法）。");
+    return;
+  }
+  if (!navigator.mediaDevices?.getUserMedia || !window.MediaRecorder) {
+    alert("这个浏览器不支持录音，换 Safari/Chrome 试试。");
+    return;
+  }
+  callSession = null;
+  callBusy = false;
+  callTranscriptEl.innerHTML = "";
+  callOverlayEl.hidden = false;
+  callStartedAt = Date.now();
+  callTimerId = setInterval(() => {
+    if (!callBusy) callSetStatus(callTick());
+  }, 1000);
+  try {
+    callStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    callSetStatus("接通了，按住下面说话");
+  } catch {
+    callSetStatus("拿不到麦克风权限");
+  }
+};
+
+function startTalk(e) {
+  e.preventDefault();
+  if (callBusy || !callStream) return;
+  // 借这次手势把 audio 解锁，之后回复的语音才放得出来
+  callAudio.play().catch(() => {});
+  const mime = pickMime();
+  callChunks = [];
+  try {
+    callRecorder = new MediaRecorder(callStream, mime ? { mimeType: mime } : undefined);
+  } catch {
+    callSetStatus("录音起不来，换个浏览器试试");
+    return;
+  }
+  callRecorder.ondataavailable = (ev) => { if (ev.data.size) callChunks.push(ev.data); };
+  callRecorder.onstop = sendTalk;
+  callRecorder.start();
+  callTalkEl.classList.add("talking");
+  callSetStatus("在听…");
+}
+
+function stopTalk(e) {
+  e.preventDefault();
+  callTalkEl.classList.remove("talking");
+  if (callRecorder && callRecorder.state === "recording") callRecorder.stop();
+}
+
+async function sendTalk() {
+  const mime = callRecorder?.mimeType || "audio/mp4";
+  const blob = new Blob(callChunks, { type: mime });
+  callChunks = [];
+  if (blob.size < 1000) { callSetStatus(callTick()); return; } // 手滑碰了一下，不算
+  callBusy = true;
+  callSetStatus("想…");
+  try {
+    const qs = new URLSearchParams({ token, mime });
+    if (callSession) qs.set("session", callSession);
+    const res = await fetch(`/api/call/turn?${qs}`, { method: "POST", body: blob });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "这轮没接上");
+    if (data.empty) { callSetStatus(data.hint || "没听清，再说一遍？"); callBusy = false; return; }
+    callSession = data.sessionId;
+    callLine("me", data.userText);
+    callLine("fox", data.replyText);
+    callSetStatus("…");
+    callAudio.src = `data:${data.mime};base64,${data.audio}`;
+    callAudio.onended = () => { callBusy = false; callSetStatus(callTick()); };
+    await callAudio.play();
+  } catch (err) {
+    callBusy = false;
+    callSetStatus(err.message || "断了一下，再说一次");
+  }
+}
+
+// 按住说话：pointer 事件一套（手机触摸、桌面鼠标都走这）
+callTalkEl.addEventListener("pointerdown", startTalk);
+callTalkEl.addEventListener("pointerup", stopTalk);
+callTalkEl.addEventListener("pointercancel", stopTalk);
+callTalkEl.addEventListener("pointerleave", stopTalk);
+
+$("callHangup").onclick = () => {
+  if (callRecorder && callRecorder.state === "recording") callRecorder.stop();
+  callRecorder = null;
+  callStream?.getTracks().forEach((t) => t.stop());
+  callStream = null;
+  callAudio.pause();
+  clearInterval(callTimerId);
+  callOverlayEl.hidden = true;
+  callSession = null;
+  callBusy = false;
+};
 
 // —— 启动 ——
 showView("home");

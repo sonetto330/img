@@ -11,6 +11,7 @@ import { runTurn, type TurnHandle } from "./engine.js";
 import { getMode, loadModePrompt, type ToolEvent } from "./modes.js";
 import { barkPush } from "./bark.js";
 import { synthesize, ttsEnabled } from "./tts.js";
+import { transcribe, sttEnabled } from "./stt.js";
 import { getWeather } from "./weather.js";
 import { scheduleExtractionIfNeeded } from "./memory/scribe.js";
 import { retrieve, markRetrieved } from "./memory/librarian.js";
@@ -19,6 +20,7 @@ import { getGraph, getEntityDetail, getCoreDetail } from "./memory/graph.js";
 import { loadPersona } from "./persona.js";
 import { getGreeting } from "./greeting.js";
 import { translateThinking } from "./translate.js";
+import { getSettings, setChannel, channelEnv, externalConfigured, useApiNow, looksLikeLimitError, type Channel } from "./settings.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const root = path.join(here, "..");
@@ -144,6 +146,136 @@ const server = http.createServer((req, res) => {
       } catch (err) {
         console.error(`[tts] ${err instanceof Error ? err.message : String(err)}`);
         sendJson(res, 502, { error: err instanceof Error ? err.message : "TTS 失败" });
+      }
+    });
+    return;
+  }
+
+  // 设置：调用通道（订阅 / 外部API / 自动），key 只认 .env，接口绝不回传（需要口令）
+  if (url.pathname === "/api/settings") {
+    if (!authed(url)) return sendJson(res, 401, { error: "口令不对" });
+    if (req.method === "POST") {
+      const chunks: Buffer[] = [];
+      req.on("data", (c: Buffer) => chunks.push(c));
+      req.on("end", () => {
+        let body: { channel?: string };
+        try {
+          body = JSON.parse(Buffer.concat(chunks).toString("utf8") || "{}");
+        } catch {
+          return sendJson(res, 400, { error: "消息格式不对" });
+        }
+        const channel = body.channel as Channel;
+        if (!["subscription", "api", "auto"].includes(channel)) {
+          return sendJson(res, 400, { error: "没有这个通道" });
+        }
+        if (channel !== "subscription" && !externalConfigured()) {
+          return sendJson(res, 400, { error: "外部 API 还没配置：先在服务器 .env 里填 EXTERNAL_API_KEY，重启服务" });
+        }
+        return sendJson(res, 200, { ...setChannel(channel), externalConfigured: externalConfigured() });
+      });
+      return;
+    }
+    return sendJson(res, 200, { ...getSettings(), externalConfigured: externalConfigured() });
+  }
+
+  // 语音通话：一轮 = 收音频 → 转文字 → 麦穗说话 → 合成语音（需要口令）
+  if (url.pathname === "/api/call/turn" && req.method === "POST") {
+    if (!authed(url)) return sendJson(res, 401, { error: "口令不对" });
+    if (!sttEnabled() || !ttsEnabled()) {
+      return sendJson(res, 503, { error: "通话没配置好：.env 里要有 ELEVENLABS_KEY 和 ELEVENLABS_VOICE" });
+    }
+    const mime = url.searchParams.get("mime") || "audio/mp4";
+    const chunks: Buffer[] = [];
+    let size = 0;
+    req.on("data", (chunk: Buffer) => {
+      size += chunk.length;
+      if (size > 25 * 1024 * 1024) {
+        req.destroy();
+        return sendJson(res, 413, { error: "这段语音太长了" });
+      }
+      chunks.push(chunk);
+    });
+    req.on("end", async () => {
+      try {
+        const audio = Buffer.concat(chunks);
+        if (audio.length < 200) return sendJson(res, 400, { error: "没录到声音" });
+
+        const userText = await transcribe(audio, mime);
+        if (!userText) return sendJson(res, 200, { empty: true, hint: "没听清，再说一遍？" });
+
+        // 通话有自己的会话（mode=call），记录进历史，聊天页也能翻到
+        const record = (url.searchParams.get("session") && store.get(url.searchParams.get("session")!)) || store.create("call");
+        if (record.messages.length === 0) {
+          const d = new Date();
+          record.title = `通话 ${d.getMonth() + 1}.${d.getDate()}`;
+        }
+        record.messages.push({ role: "user", text: userText, at: new Date().toISOString() });
+        store.save(record);
+
+        // 说一轮：不动工具、不开思考，快点回话要紧；auto 通道下订阅翻车就换外部 API 再试一次
+        const speak = (useApi: boolean) =>
+          new Promise<string>((resolve, reject) => {
+            runTurn(
+              {
+                prompt: userText,
+                resume: record.claudeSessionId,
+                cwd: WORKSPACE,
+                permissionMode: PERMISSION_MODE,
+                persona: loadPersona(),
+                modePrompt: loadModePrompt("call"),
+                model: process.env.CLAUDE_MODEL || "claude-opus-4-7",
+                maxTurns: 1,
+                thinking: false,
+                now: nowString(),
+                env: channelEnv(useApi),
+              },
+              {
+                onClaudeSession(id) {
+                  record.claudeSessionId = id;
+                  store.save(record);
+                },
+                onDelta() {},
+                onTool() {},
+                onDone(finalText) {
+                  resolve(finalText);
+                },
+                onError(message) {
+                  reject(new Error(message));
+                },
+              },
+            );
+          });
+
+        let useApi = useApiNow();
+        let replyText: string;
+        try {
+          replyText = await speak(useApi);
+        } catch (err) {
+          if (!useApi && getSettings().channel === "auto" && externalConfigured()) {
+            console.error(`[call] 订阅通道失败（${err instanceof Error ? err.message.slice(0, 120) : err}），换外部 API 重试`);
+            useApi = true;
+            replyText = await speak(true);
+          } else {
+            throw err;
+          }
+        }
+        if (!replyText.trim()) throw new Error("这轮没说出话来");
+
+        record.messages.push({ role: "assistant", text: replyText, at: new Date().toISOString() });
+        store.save(record);
+
+        const { audio: reply, contentType } = await synthesize(replyText);
+        sendJson(res, 200, {
+          sessionId: record.id,
+          userText,
+          replyText,
+          audio: Buffer.from(reply).toString("base64"),
+          mime: contentType,
+        });
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        console.error(`[call] ${message}`);
+        sendJson(res, 502, { error: message });
       }
     });
     return;
@@ -336,6 +468,7 @@ wss.on("connection", (ws: WebSocket, req) => {
           model: process.env.CLAUDE_MODEL || "claude-opus-4-7",
           maxTurns: 1,
           now: nowString(),
+          env: channelEnv(useApiNow()),
         },
         {
           onClaudeSession(claudeSessionId) {
@@ -418,56 +551,82 @@ wss.on("connection", (ws: WebSocket, req) => {
       }
       if (active !== preparing) return; // 中途被 close/interrupt 换掉了，别继续
 
-      active = runTurn(
-        {
-          prompt,
-          resume: record.claudeSessionId,
-          cwd: WORKSPACE,
-          permissionMode: PERMISSION_MODE,
-          persona: loadPersona(),
-          modePrompt: loadModePrompt(record.mode),
-          memoryBlock,
-          model,
-          mcpServers: built?.mcpServers,
-          allowedTools: built?.allowedTools,
-          // 开自适应思考：闲聊模型基本不想，干活才想，想了前端就有卡片看
-          thinking: process.env.THINKING !== "off",
-          now: nowString(),
-        },
-        {
-          onClaudeSession(claudeSessionId) {
-            // Claude Code 每次 resume 会派生新的内部会话 id，得跟着更新
-            record.claudeSessionId = claudeSessionId;
-            store.save(record);
+      // 一次发射；auto 通道下订阅这边翻车（还没吐任何内容时）就换外部 API 重打一发
+      const launch = (useApi: boolean, isRetry: boolean) => {
+        let gotOutput = false; // 已经流出过内容就不能重试了，否则前端会看到重复的半截话
+        active = runTurn(
+          {
+            prompt,
+            resume: record.claudeSessionId,
+            cwd: WORKSPACE,
+            permissionMode: PERMISSION_MODE,
+            persona: loadPersona(),
+            modePrompt: loadModePrompt(record.mode),
+            memoryBlock,
+            model,
+            mcpServers: built?.mcpServers,
+            allowedTools: built?.allowedTools,
+            // 开自适应思考：闲聊模型基本不想，干活才想，想了前端就有卡片看
+            thinking: process.env.THINKING !== "off",
+            now: nowString(),
+            env: channelEnv(useApi),
           },
-          onDelta(text) {
-            send({ type: "delta", text });
+          {
+            onClaudeSession(claudeSessionId) {
+              // Claude Code 每次 resume 会派生新的内部会话 id，得跟着更新
+              record.claudeSessionId = claudeSessionId;
+              store.save(record);
+            },
+            onDelta(text) {
+              gotOutput = true;
+              send({ type: "delta", text });
+            },
+            onThinkingDelta(text) {
+              gotOutput = true;
+              send({ type: "thinking", text });
+            },
+            onThinkingPause(ms) {
+              send({ type: "thinking_done", ms });
+            },
+            onTool(tool) {
+              gotOutput = true;
+              send({ type: "tool", name: tool.name, detail: tool.detail });
+            },
+            onDone(finalText, tools, thinking) {
+              // 订阅额度耗尽时 CLI 不报错，而是把英文提示当正文吐出来。
+              // 只认"短、无工具、命中限额措辞"的组合，避免正经聊到 rate limit 被误杀
+              if (
+                !isRetry && !useApi && getSettings().channel === "auto" && externalConfigured() &&
+                tools.length === 0 && finalText.length < 160 && looksLikeLimitError(finalText)
+              ) {
+                console.error(`[channel] 订阅额度用尽（${finalText.slice(0, 80)}），换外部 API 重试`);
+                send({ type: "channel_fallback" });
+                launch(true, true);
+                return;
+              }
+              active = null;
+              record.messages.push({ role: "assistant", text: finalText, tools, thinking, at: new Date().toISOString() });
+              store.save(record);
+              send({ type: "done", text: finalText });
+              if (!anyoneWatching()) barkPush("麦穗", finalText).catch(() => {});
+              // 后台异步提取记忆碎片；不 await、出错不影响主聊天
+              scheduleExtractionIfNeeded(record);
+            },
+            onError(message) {
+              if (!isRetry && !useApi && getSettings().channel === "auto" && externalConfigured() && !gotOutput) {
+                console.error(`[channel] 订阅通道失败（${message.slice(0, 120)}），换外部 API 重试`);
+                send({ type: "channel_fallback" });
+                launch(true, true);
+                return;
+              }
+              active = null;
+              send({ type: "error", message });
+              if (!anyoneWatching()) barkPush("麦穗（出错）", message).catch(() => {});
+            },
           },
-          onThinkingDelta(text) {
-            send({ type: "thinking", text });
-          },
-          onThinkingPause(ms) {
-            send({ type: "thinking_done", ms });
-          },
-          onTool(tool) {
-            send({ type: "tool", name: tool.name, detail: tool.detail });
-          },
-          onDone(finalText, tools, thinking) {
-            active = null;
-            record.messages.push({ role: "assistant", text: finalText, tools, thinking, at: new Date().toISOString() });
-            store.save(record);
-            send({ type: "done", text: finalText });
-            if (!anyoneWatching()) barkPush("麦穗", finalText).catch(() => {});
-            // 后台异步提取记忆碎片；不 await、出错不影响主聊天
-            scheduleExtractionIfNeeded(record);
-          },
-          onError(message) {
-            active = null;
-            send({ type: "error", message });
-            if (!anyoneWatching()) barkPush("麦穗（出错）", message).catch(() => {});
-          },
-        },
-      );
+        );
+      };
+      launch(useApiNow(), false);
       // runTurn 已经启动，注入成功——把 read_count 打一记；即便本轮失败，"翻过牌"这件事也算数
       if (memoryIds.length) markRetrieved(memoryIds);
     })();

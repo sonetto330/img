@@ -4,6 +4,7 @@ import { query } from "@anthropic-ai/claude-agent-sdk";
 import { loadPersona } from "./persona.js";
 import { getWeather } from "./weather.js";
 import { getDb } from "./memory/db.js";
+import { channelEnv, useApiNow } from "./settings.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const root = path.join(here, "..");
@@ -58,6 +59,7 @@ ${memories}
             ? `\n以下是你的身份设定，任何时候都遵守：\n\n${persona}\n\n${contextBlock}`
             : `\n${contextBlock}`,
         },
+        env: channelEnv(useApiNow()),
         stderr: (data) => console.error(`[greeting.haiku] ${data}`),
       },
     });

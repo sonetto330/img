@@ -728,3 +728,123 @@ footer textarea::placeholder { color: var(--muted); opacity: .75; }
 .nav-heart:active .heart-circle { transform: scale(.94); }
 .heart-circle svg { width: 27px; height: 27px; color: var(--name); }
 .nav-heart.active .heart-circle svg { color: var(--accent); fill: rgba(201, 103, 63, .12); }
+
+/* —— 工具页 / 设置页：跟首页一个纸面气质 —— */
+.page-scroll {
+  height: 100dvh; overflow-y: auto;
+  padding:
+    calc(28px + env(safe-area-inset-top))
+    max(22px, calc((100% - 500px) / 2))
+    calc(88px + env(safe-area-inset-bottom));
+}
+.page-title {
+  font-family: var(--kai); font-size: 30px; color: var(--ink);
+  letter-spacing: 6px; margin-bottom: 26px;
+}
+.page-en {
+  font-family: "Canela", Georgia, serif;
+  font-size: 11px; letter-spacing: 4px; color: var(--muted);
+  margin-left: 8px; vertical-align: 6px;
+}
+
+.tool-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+.tool-card {
+  display: flex; flex-direction: column; align-items: flex-start; gap: 8px;
+  padding: 20px 18px; text-align: left;
+  background: var(--panel); border: 1px solid var(--line); border-radius: 16px;
+  font-family: var(--kai); color: var(--ink); cursor: pointer;
+}
+.tool-card b { font-size: 16px; font-weight: 600; letter-spacing: 2px; }
+.tool-card small { font-size: 11.5px; color: var(--muted); letter-spacing: 1px; }
+.tool-card-icon { color: var(--name); }
+.tool-card-icon svg { width: 26px; height: 26px; }
+.tool-card-soon { opacity: .45; cursor: default; }
+
+.settings-group {
+  background: var(--panel); border: 1px solid var(--line); border-radius: 16px;
+  padding: 18px;
+}
+.settings-head {
+  font-family: var(--kai); font-size: 15px; color: var(--ink);
+  letter-spacing: 2px; margin-bottom: 4px;
+}
+.settings-sub {
+  font-family: var(--kai); font-size: 11.5px; color: var(--muted);
+  letter-spacing: .5px; margin-bottom: 14px; line-height: 1.6;
+}
+.channel-opt {
+  display: flex; align-items: flex-start; gap: 10px;
+  padding: 12px 10px; border-top: 1px solid var(--line);
+  cursor: pointer;
+}
+.channel-opt input { margin-top: 3px; accent-color: var(--accent); }
+.channel-opt input:disabled + .channel-text { opacity: .4; }
+.channel-text { display: flex; flex-direction: column; gap: 3px; font-family: var(--kai); }
+.channel-text b { font-size: 14px; color: var(--ink); font-weight: 600; letter-spacing: 1px; }
+.channel-text small { font-size: 11.5px; color: var(--muted); letter-spacing: .5px; }
+
+/* 聊天里的通道切换提示：跟时间戳一样的居中小字 */
+.chan-note {
+  align-self: center; text-align: center;
+  font-family: var(--kai); font-size: 11px; color: var(--muted);
+  letter-spacing: 1px; margin: 10px 0; opacity: .8;
+}
+
+/* —— 通话界面：全屏纸面，像一通真的电话 —— */
+.call-overlay {
+  position: fixed; inset: 0; z-index: 60;
+  background: var(--bg);
+  display: flex; flex-direction: column; align-items: center;
+  padding:
+    calc(46px + env(safe-area-inset-top)) 24px
+    calc(36px + env(safe-area-inset-bottom));
+}
+.call-overlay[hidden] { display: none; }
+.call-head { text-align: center; margin-bottom: 18px; }
+.call-name {
+  font-family: var(--kai); font-size: 30px; color: var(--ink); letter-spacing: 8px;
+}
+.call-status {
+  font-family: "Canela", Georgia, serif; font-size: 13px; color: var(--muted);
+  letter-spacing: 2px; margin-top: 8px; min-height: 18px;
+}
+.call-fox {
+  width: 148px; height: 148px; border-radius: 50%;
+  object-fit: cover; object-position: 62% 30%;
+  border: 1px solid var(--line); background: var(--panel);
+  flex: none;
+}
+.call-transcript {
+  flex: 1; width: 100%; max-width: 440px;
+  overflow-y: auto; margin: 22px 0;
+  display: flex; flex-direction: column; gap: 10px;
+}
+.call-line {
+  font-family: var(--kai); font-size: 13.5px; line-height: 1.8;
+  letter-spacing: .5px; max-width: 86%;
+}
+.call-line.me { align-self: flex-end; color: var(--muted); text-align: right; }
+.call-line.fox { align-self: flex-start; color: var(--ink); }
+.call-actions {
+  display: flex; flex-direction: column; align-items: center; gap: 16px;
+  width: 100%;
+}
+.call-talk {
+  width: 108px; height: 108px; border-radius: 50%;
+  border: 1px solid var(--line); background: var(--panel);
+  font-family: var(--kai); font-size: 14px; color: var(--ink); letter-spacing: 2px;
+  cursor: pointer;
+  touch-action: none; user-select: none; -webkit-user-select: none;
+  transition: transform .12s, background .12s;
+}
+.call-talk.talking {
+  background: var(--accent-soft); border-color: var(--accent);
+  transform: scale(1.06);
+}
+.call-hangup {
+  width: 46px; height: 46px; border-radius: 50%;
+  border: none; background: #c0564a; color: #fff;
+  display: flex; align-items: center; justify-content: center;
+  cursor: pointer;
+}
+.call-hangup svg { width: 18px; height: 18px; }
