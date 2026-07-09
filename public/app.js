@@ -619,7 +619,9 @@ inputEl.addEventListener("input", autoGrow);
 
 // —— 会话列表 ——
 async function api(pathname) {
-  const res = await fetch(`${pathname}?token=${encodeURIComponent(token)}`);
+  // 路径里可能已经带参数（如 /api/models?refresh=1），别把 token 拼坏了
+  const sep = pathname.includes("?") ? "&" : "?";
+  const res = await fetch(`${pathname}${sep}token=${encodeURIComponent(token)}`);
   if (res.status === 401) {
     localStorage.removeItem("home_token");
     location.reload();
