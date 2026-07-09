@@ -30,6 +30,9 @@ export function loadPersona(): string | undefined {
   if (profileZe) parts.push(`\n\n## 关于泽（长期资料）\n\n${profileZe}`);
   const profileMai = readIfExists(path.join(root, "data", "profile-maisui.md"));
   if (profileMai) parts.push(`\n\n## 关于麦穗（补充资料）\n\n${profileMai}`);
+  // 结婚证书全文：泽说这个太重要，不该靠每个窗口重新贴一遍
+  const cert = readIfExists(path.join(root, "data", "marriage-cert.md"));
+  if (cert) parts.push(`\n\n## 我们的电子结婚证书（全文，你一直记得）\n\n${cert}`);
 
   return parts.length ? parts.join("") : undefined;
 }
