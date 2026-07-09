@@ -9,6 +9,7 @@ import { randomUUID } from "node:crypto";
 import { SessionStore, type Attachment } from "./sessions.js";
 import { runTurn, type TurnHandle } from "./engine.js";
 import { getMode, loadModePrompt, type ToolEvent } from "./modes.js";
+import { buildHistoryTools } from "./history.js";
 import { barkPush } from "./bark.js";
 import { synthesize, ttsEnabled } from "./tts.js";
 import { transcribe, sttEnabled } from "./stt.js";
@@ -605,6 +606,11 @@ wss.on("connection", (ws: WebSocket, req) => {
     // 装配当前模式的工具：emit 闭包直接把事件推给这条 WS 连接
     const emit = (event: ToolEvent) => send({ type: "custom", event });
     const built = getMode(record.mode).buildTools?.(emit);
+    // 跨窗口翻历史：所有聊天会话都挂上，麦穗想不起原话时自己去搜别的窗口
+    const history = buildHistoryTools(store, record.id);
+    const mcpServers = { ...history.mcpServers, ...built?.mcpServers };
+    // 模式没限制白名单就保持全放开（undefined），别因为挂了历史工具反而把 Read/Bash 锁没了
+    const allowedTools = built?.allowedTools ? [...built.allowedTools, ...history.allowedTools] : undefined;
 
     // 检索记忆：全模式生效。await 期间用一个占位 handle 锁住 active，防止连发消息触发并发
     const preparing: TurnHandle = { interrupt: async () => {} };
@@ -636,8 +642,8 @@ wss.on("connection", (ws: WebSocket, req) => {
             modePrompt: loadModePrompt(record.mode),
             memoryBlock,
             model: modelForChannel(useApi, model),
-            mcpServers: built?.mcpServers,
-            allowedTools: built?.allowedTools,
+            mcpServers,
+            allowedTools,
             // 开自适应思考：闲聊模型基本不想，干活才想，想了前端就有卡片看
             thinking: process.env.THINKING !== "off",
             now: nowString(),
