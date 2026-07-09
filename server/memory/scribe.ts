@@ -3,7 +3,7 @@ import { fileURLToPath } from "node:url";
 import { query } from "@anthropic-ai/claude-agent-sdk";
 import type { SessionRecord } from "../sessions.js";
 import { getDb } from "./db.js";
-import { channelEnv, looksLikeLimitError, stderrLogger, withChannelFallback } from "../settings.js";
+import { channelEnv, haikuForChannel, looksLikeLimitError, stderrLogger, withChannelFallback } from "../settings.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const root = path.join(here, "..", "..");
@@ -106,7 +106,7 @@ ${existingList}
       prompt: `分析这段对话，提取碎片：\n\n${convo}`,
       options: {
         cwd: root,
-        model: "claude-haiku-4-5-20251001",
+        model: haikuForChannel(useApi),
         permissionMode: "bypassPermissions",
         allowedTools: [],
         maxTurns: 1,

@@ -1,5 +1,5 @@
 import { query } from "@anthropic-ai/claude-agent-sdk";
-import { channelEnv, looksLikeLimitError, withChannelFallback } from "./settings.js";
+import { channelEnv, haikuForChannel, looksLikeLimitError, withChannelFallback } from "./settings.js";
 
 /** 思考内容太长就掐头去尾，翻译按钮是给人看个大意的，不是做文献 */
 const MAX_INPUT = 8000;
@@ -11,7 +11,7 @@ export async function translateThinking(text: string): Promise<string> {
     const q = query({
       prompt: `把下面这段 AI 的内心思考过程翻译成自然的中文口语。保持第一人称视角，语气随意点。只输出译文，不要任何解释或前后缀：\n\n${input}`,
       options: {
-        model: "haiku",
+        model: haikuForChannel(useApi),
         maxTurns: 1,
         allowedTools: [],
         thinking: { type: "disabled" },

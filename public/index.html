@@ -193,6 +193,16 @@
           <input type="checkbox" id="extBearer" />
           <span class="channel-text"><b>这个中转只认 Bearer 验证</b><small>key 确定没错还报 401 时勾上再试</small></span>
         </label>
+        <div class="ext-field">
+          <label for="extModel">对话用的模型 <a id="extModelRefresh" class="ext-refresh" href="javascript:void 0">拉取列表</a></label>
+          <select id="extModel"><option value="">不指定（原样传，中转认官方名就行）</option></select>
+          <small id="extModelHint">列表从中转站/官方现拉；中转的模型名常跟官方不一样，选一个当外部通道的默认</small>
+        </div>
+        <div class="ext-field">
+          <label for="extHaiku">后台小活用的模型</label>
+          <select id="extHaiku"><option value="">不指定（用官方 Haiku 名）</option></select>
+          <small>问候语 / 记忆提取 / 翻译这些便宜活，挑个中转里最便宜的小模型</small>
+        </div>
         <button id="extSave" class="ext-save" type="button">保存</button>
       </div>
     </div>

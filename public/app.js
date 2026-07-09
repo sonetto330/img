@@ -548,6 +548,34 @@ modelSelect.onchange = () => {
   else localStorage.removeItem("home_model");
 };
 
+// 从服务端拉模型列表重建选择器：订阅一组、外部一组（中转站的模型名常跟官方不一样）
+let modelsCache = null;
+async function loadModels(refresh = false) {
+  const data = await api(`/api/models${refresh ? "?refresh=1" : ""}`);
+  modelsCache = data;
+  const saved = localStorage.getItem("home_model") || "";
+  modelSelect.innerHTML = "";
+  modelSelect.appendChild(new Option("默认", ""));
+  const subGroup = document.createElement("optgroup");
+  subGroup.label = "订阅";
+  for (const m of data.subscription) subGroup.appendChild(new Option(m.name, m.id));
+  modelSelect.appendChild(subGroup);
+  if (data.external.length) {
+    const extGroup = document.createElement("optgroup");
+    extGroup.label = "外部 API";
+    for (const m of data.external) extGroup.appendChild(new Option(m.name, m.id));
+    modelSelect.appendChild(extGroup);
+  }
+  // 恢复本机记的选择；已经不在列表里就回默认
+  modelSelect.value = saved;
+  if (modelSelect.value !== saved) {
+    modelSelect.value = "";
+    localStorage.removeItem("home_model");
+  }
+  return data;
+}
+loadModels().catch(() => {}); // 启动时拉一次，失败就用 HTML 里写死的仨
+
 sendBtn.onclick = sendMessage;
 stopBtn.onclick = () => ws?.send(JSON.stringify({ type: "interrupt" }));
 
@@ -1057,11 +1085,46 @@ async function loadChannelSettings() {
     $("extBaseUrl").value = s.externalBaseUrl || "";
     $("extBearer").checked = s.externalAuth === "bearer";
     extStatusEl.textContent = "改完点保存，立即生效，不用重启服务";
+    // 模型下拉框：先用启动时拉的列表填上；没拉到过就静默留默认项
+    fillExtModelSelects(s);
+    if (s.externalConfigured && !(modelsCache && modelsCache.external.length)) {
+      loadModels().then(() => fillExtModelSelects(s)).catch(() => {});
+    }
   } catch {
     statusEl.textContent = "设置读不到，稍后再试";
     extStatusEl.textContent = "设置读不到，稍后再试";
   }
 }
+
+// 把拉到的外部模型列表灌进设置页的两个下拉框，并回显当前配置
+function fillExtModelSelects(s) {
+  const list = (modelsCache && modelsCache.external) || [];
+  for (const [id, current] of [["extModel", s.externalModel], ["extHaiku", s.externalHaiku]]) {
+    const sel = $(id);
+    const keep = sel.querySelector("option[value='']");
+    sel.innerHTML = "";
+    sel.appendChild(keep);
+    for (const m of list) sel.appendChild(new Option(m.name, m.id));
+    // 当前配的模型不在列表里（还没拉过/中转下架了）也得显示出来，别默默变成"不指定"
+    if (current && !list.some((m) => m.id === current)) sel.appendChild(new Option(`${current}（不在列表里）`, current));
+    sel.value = current || "";
+  }
+  const hint = $("extModelHint");
+  if (modelsCache && modelsCache.externalError) hint.textContent = `拉取失败：${modelsCache.externalError}`;
+  else if (list.length) hint.textContent = `拉到 ${list.length} 个模型`;
+}
+
+$("extModelRefresh").onclick = async () => {
+  const hint = $("extModelHint");
+  hint.textContent = "拉取中…";
+  try {
+    await loadModels(true);
+    const s = await api("/api/settings");
+    fillExtModelSelects(s);
+  } catch (err) {
+    hint.textContent = `拉取失败：${err.message || "网络不通"}`;
+  }
+};
 
 async function postSettings(body) {
   const res = await fetch(`/api/settings?token=${encodeURIComponent(token)}`, {
@@ -1093,6 +1156,8 @@ $("extSave").onclick = async () => {
   const body = {
     externalBaseUrl: $("extBaseUrl").value.trim(),
     externalAuth: $("extBearer").checked ? "bearer" : "x-api-key",
+    externalModel: $("extModel").value,
+    externalHaiku: $("extHaiku").value,
   };
   // key 框留空 = 不动现有的 key；填了才覆盖
   const key = $("extKey").value.trim();

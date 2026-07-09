@@ -20,7 +20,8 @@ import { getGraph, getEntityDetail, getCoreDetail } from "./memory/graph.js";
 import { loadPersona } from "./persona.js";
 import { getGreeting } from "./greeting.js";
 import { translateThinking } from "./translate.js";
-import { getSettings, setChannel, setExternal, publicSettings, channelEnv, externalConfigured, useApiNow, looksLikeLimitError, type Channel } from "./settings.js";
+import { getSettings, setChannel, setExternal, publicSettings, channelEnv, externalConfigured, useApiNow, looksLikeLimitError, modelForChannel, isKnownExternalModel, type Channel } from "./settings.js";
+import { listExternalModels, SUBSCRIPTION_MODELS } from "./models.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const root = path.join(here, "..");
@@ -159,14 +160,19 @@ const server = http.createServer((req, res) => {
       const chunks: Buffer[] = [];
       req.on("data", (c: Buffer) => chunks.push(c));
       req.on("end", () => {
-        let body: { channel?: string; externalKey?: string; externalBaseUrl?: string; externalAuth?: string };
+        let body: {
+          channel?: string; externalKey?: string; externalBaseUrl?: string;
+          externalAuth?: string; externalModel?: string; externalHaiku?: string;
+        };
         try {
           body = JSON.parse(Buffer.concat(chunks).toString("utf8") || "{}");
         } catch {
           return sendJson(res, 400, { error: "消息格式不对" });
         }
         // 先存外部 API 配置（有哪项动哪项），再切通道——这样"填 key + 选自动"能一次保存
-        if (body.externalKey !== undefined || body.externalBaseUrl !== undefined || body.externalAuth !== undefined) {
+        const hasExternalField = [body.externalKey, body.externalBaseUrl, body.externalAuth, body.externalModel, body.externalHaiku]
+          .some((v) => v !== undefined);
+        if (hasExternalField) {
           if (body.externalKey !== undefined && (typeof body.externalKey !== "string" || body.externalKey.length > 300)) {
             return sendJson(res, 400, { error: "key 格式不对" });
           }
@@ -177,10 +183,17 @@ const server = http.createServer((req, res) => {
           if (body.externalAuth !== undefined && !["", "x-api-key", "bearer"].includes(body.externalAuth)) {
             return sendJson(res, 400, { error: "验证方式只有 x-api-key 和 bearer 两种" });
           }
+          for (const m of [body.externalModel, body.externalHaiku]) {
+            if (m !== undefined && (typeof m !== "string" || m.length > 120)) {
+              return sendJson(res, 400, { error: "模型名格式不对" });
+            }
+          }
           setExternal({
             key: body.externalKey,
             baseUrl: body.externalBaseUrl,
             auth: body.externalAuth as "x-api-key" | "bearer" | "" | undefined,
+            model: body.externalModel,
+            haiku: body.externalHaiku,
           });
         }
         if (body.channel !== undefined) {
@@ -198,6 +211,20 @@ const server = http.createServer((req, res) => {
       return;
     }
     return sendJson(res, 200, publicSettings());
+  }
+
+  // 模型列表：订阅是固定仨别名；外部的从官方/中转现拉（中转的模型名常跟官方不一样）
+  if (url.pathname === "/api/models") {
+    if (!authed(url)) return sendJson(res, 401, { error: "口令不对" });
+    listExternalModels(url.searchParams.get("refresh") === "1")
+      .then((ext) => sendJson(res, 200, {
+        subscription: SUBSCRIPTION_MODELS,
+        external: ext.models,
+        externalError: ext.error || "",
+        externalConfigured: externalConfigured(),
+      }))
+      .catch((err) => sendJson(res, 502, { error: err instanceof Error ? err.message : String(err) }));
+    return;
   }
 
   // 语音通话：一轮 = 收音频 → 转文字 → 麦穗说话 → 合成语音（需要口令）
@@ -245,7 +272,7 @@ const server = http.createServer((req, res) => {
                 permissionMode: PERMISSION_MODE,
                 persona: loadPersona(),
                 modePrompt: loadModePrompt("call"),
-                model: process.env.CLAUDE_MODEL || "claude-opus-4-7",
+                model: modelForChannel(useApi, process.env.CLAUDE_MODEL || "claude-opus-4-7"),
                 maxTurns: 1,
                 thinking: false,
                 now: nowString(),
@@ -490,7 +517,7 @@ wss.on("connection", (ws: WebSocket, req) => {
             permissionMode: PERMISSION_MODE,
             persona: loadPersona(),
             modePrompt: loadModePrompt(record.mode),
-            model: process.env.CLAUDE_MODEL || "claude-opus-4-7",
+            model: modelForChannel(useApi, process.env.CLAUDE_MODEL || "claude-opus-4-7"),
             maxTurns: 1,
             now: nowString(),
             env: channelEnv(useApi),
@@ -554,7 +581,7 @@ wss.on("connection", (ws: WebSocket, req) => {
 
     const text = msg.text?.trim() || "";
     if (msg.type !== "chat" || (!text && attachments.length === 0)) return;
-    const model = MODEL_ALIASES.has(msg.model || "")
+    const model = MODEL_ALIASES.has(msg.model || "") || isKnownExternalModel(msg.model || "")
       ? msg.model!
       : process.env.CLAUDE_MODEL || "claude-opus-4-7";
     if (active) return send({ type: "error", message: "上一条还在跑，等等或者先打断" });
@@ -607,7 +634,7 @@ wss.on("connection", (ws: WebSocket, req) => {
             persona: loadPersona(),
             modePrompt: loadModePrompt(record.mode),
             memoryBlock,
-            model,
+            model: modelForChannel(useApi, model),
             mcpServers: built?.mcpServers,
             allowedTools: built?.allowedTools,
             // 开自适应思考：闲聊模型基本不想，干活才想，想了前端就有卡片看

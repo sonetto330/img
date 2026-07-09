@@ -21,6 +21,10 @@ interface Settings {
   externalKey?: string;
   externalBaseUrl?: string;
   externalAuth?: ExternalAuth;
+  /** 走外部通道时对话用的模型 id（中转站的模型名常跟官方不一样）；不填就原样传 */
+  externalModel?: string;
+  /** 走外部通道时后台小活（问候/记忆提取/翻译）用的模型 id；不填用官方 haiku 名 */
+  externalHaiku?: string;
 }
 
 const DEFAULTS: Settings = { channel: "subscription" };
@@ -51,11 +55,19 @@ export function setChannel(channel: Channel): Settings {
 }
 
 /** 设置页改外部 API 配置：传空字符串 = 清掉设置页的值、回退到 .env 里的 */
-export function setExternal(patch: { key?: string; baseUrl?: string; auth?: ExternalAuth | "" }): Settings {
+export function setExternal(patch: {
+  key?: string;
+  baseUrl?: string;
+  auth?: ExternalAuth | "";
+  model?: string;
+  haiku?: string;
+}): Settings {
   const s = { ...getSettings() };
   if (patch.key !== undefined) s.externalKey = patch.key.trim() || undefined;
   if (patch.baseUrl !== undefined) s.externalBaseUrl = patch.baseUrl.trim() || undefined;
   if (patch.auth !== undefined) s.externalAuth = patch.auth || undefined;
+  if (patch.model !== undefined) s.externalModel = patch.model.trim() || undefined;
+  if (patch.haiku !== undefined) s.externalHaiku = patch.haiku.trim() || undefined;
   return save(s);
 }
 
@@ -90,7 +102,50 @@ export function publicSettings() {
     keySource: s.externalKey ? "settings" : key ? "env" : "",
     externalBaseUrl: effectiveBaseUrl(),
     externalAuth: effectiveAuth(),
+    externalModel: s.externalModel || "",
+    externalHaiku: s.externalHaiku || "",
   };
+}
+
+/** 拉模型列表/直连外部 API 时的请求要素；没配 key 返回 null */
+export function externalRequest(): { baseUrl: string; headers: Record<string, string> } | null {
+  const key = effectiveKey();
+  if (!key) return null;
+  const headers: Record<string, string> = { "anthropic-version": "2023-06-01" };
+  if (effectiveAuth() === "bearer") headers.Authorization = `Bearer ${key}`;
+  else headers["x-api-key"] = key;
+  return { baseUrl: effectiveBaseUrl() || "https://api.anthropic.com", headers };
+}
+
+// —— 外部模型名的记账：/api/models 拉到什么就认什么，重启后第一次拉取前是空的 ——
+let knownExternalModels = new Set<string>();
+
+export function rememberExternalModels(ids: string[]): void {
+  knownExternalModels = new Set(ids);
+}
+
+export function isKnownExternalModel(id: string): boolean {
+  return knownExternalModels.has(id);
+}
+
+/**
+ * 这一轮实际该用哪个模型：
+ * 订阅通道原样；外部通道下，用户明确点的是外部列表里的模型就尊重，
+ * 否则换成设置页配的"外部对话模型"（没配就原样传，兼容模型名跟官方一致的中转）
+ */
+export function modelForChannel(useApi: boolean, requested: string): string {
+  if (!useApi) return requested;
+  if (isKnownExternalModel(requested)) return requested;
+  return getSettings().externalModel || requested;
+}
+
+/** 后台小活（问候语/记忆提取/翻译）这一轮用哪个模型 */
+export function haikuForChannel(useApi: boolean): string {
+  if (useApi) {
+    const m = getSettings().externalHaiku;
+    if (m) return m;
+  }
+  return "claude-haiku-4-5-20251001";
 }
 
 /**
