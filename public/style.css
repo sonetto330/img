@@ -32,7 +32,7 @@
   --kai: "KingHwa_OldSong", Georgia, "Kaiti SC", "STKaiti", "KaiTi", "DFKai-SB", serif;
   /* 聊天正文（官端同款配方）：西文衬线管数字英文，中文落到系统宋体——
      iPhone 上是宋体-简（跟 Claude 官方 app 一个效果），Windows 上退到中易宋体 */
-  --prose: Georgia, "Songti SC", "STSong", "SimSun", serif;
+  --prose: "Times New Roman", "Songti SC", "STSong", "SimSun", serif;
 }
 
 html, body { height: 100%; }
