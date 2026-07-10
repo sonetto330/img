@@ -30,6 +30,9 @@
   --serif: "Songti SC", "STSong", "SimSun", Georgia, "Times New Roman", serif;
   /* 聊天正文：京华老宋体打头，没加载好之前楷体顶 */
   --kai: "KingHwa_OldSong", Georgia, "Kaiti SC", "STKaiti", "KaiTi", "DFKai-SB", serif;
+  /* 聊天正文（官端同款配方）：西文衬线管数字英文，中文落到系统宋体——
+     iPhone 上是宋体-简（跟 Claude 官方 app 一个效果），Windows 上退到中易宋体 */
+  --prose: Georgia, "Songti SC", "STSong", "SimSun", serif;
 }
 
 html, body { height: 100%; }
@@ -104,7 +107,7 @@ header button#backHome { font-size: 18px; }
   /* 手机两侧至少 26px 留白，读起来像书页不是报表 */
   padding: 18px max(26px, calc((100% - 700px) / 2)) 10px;
   display: flex; flex-direction: column; gap: 12px;
-  /* 正文用回系统无衬线：老宋体手机上大段阅读费眼（泽 7/10 实测）；名字、时间戳单独留宋 */
+  font-family: var(--prose);
 }
 
 .msg {
@@ -123,7 +126,7 @@ header button#backHome { font-size: 18px; }
   align-self: flex-start; background: none; color: var(--ink);
   max-width: 100%; width: 100%;
   padding: 0 2px; border-radius: 0;
-  font-size: 17px; line-height: 1.75;
+  font-size: 17px; line-height: 1.8;
 }
 /* 他的回合头：名字 + 时间 */
 .ta-head {
