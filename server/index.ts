@@ -6,8 +6,8 @@ import { fileURLToPath } from "node:url";
 import { WebSocketServer, type WebSocket } from "ws";
 import type { Options } from "@anthropic-ai/claude-agent-sdk";
 import { randomUUID } from "node:crypto";
-import { SessionStore, type Attachment } from "./sessions.js";
-import { runTurn, type TurnHandle } from "./engine.js";
+import { SessionStore, type Attachment, type SessionRecord } from "./sessions.js";
+import { runTurn, type TurnHandle, type TurnUsage } from "./engine.js";
 import { getMode, loadModePrompt, type ToolEvent } from "./modes.js";
 import { buildHistoryTools } from "./history.js";
 import { barkPush } from "./bark.js";
@@ -32,6 +32,8 @@ const TOKEN = process.env.ACCESS_TOKEN || "";
 const WORKSPACE = path.resolve(process.env.WORKSPACE_DIR || path.join(root, "workspace"));
 const PERMISSION_MODE = (process.env.PERMISSION_MODE || "bypassPermissions") as Options["permissionMode"];
 const DATA_DIR = path.join(root, "data");
+// 单次上下文（累计输入÷步数）超过这个 token 数就自动给会话瘦身（/compact）；0 = 关自动挡
+const COMPACT_THRESHOLD = Number(process.env.COMPACT_THRESHOLD_TOKENS || 150000);
 
 if (!TOKEN) {
   console.error("请先在 .env 里设置 ACCESS_TOKEN（访问口令），参考 .env.example");
@@ -79,6 +81,79 @@ function nowString(): string {
 function sendJson(res: http.ServerResponse, status: number, body: unknown): void {
   res.writeHead(status, { "Content-Type": "application/json; charset=utf-8" });
   res.end(JSON.stringify(body));
+}
+
+// 正在瘦身的会话：压缩期间 resume 旧 id 会 fork 出没压缩的分支，新消息必须挡住
+const compacting = new Set<string>();
+
+/**
+ * 给会话做一次 /compact：SDK 把历史压成摘要，聊过什么、定过什么都在，
+ * 大文件原文被压掉，之后单次上下文从几十万掉到几万。
+ * 斜杠命令必须独占 prompt，所以这轮不传 now/memoryBlock（engine 会把它们
+ * 包成 system-reminder 拼在前面，/compact 就不再是行首、变成普通文本了）。
+ */
+function runCompact(record: SessionRecord): Promise<void> {
+  if (!record.claudeSessionId) return Promise.reject(new Error("这个会话还没聊过，没东西可压"));
+  if (compacting.has(record.id)) return Promise.reject(new Error("正在瘦身，别重复点"));
+  compacting.add(record.id);
+  const attempt = (useApi: boolean) =>
+    new Promise<void>((resolve, reject) => {
+      runTurn(
+        {
+          prompt: "/compact",
+          resume: record.claudeSessionId,
+          cwd: WORKSPACE,
+          permissionMode: PERMISSION_MODE,
+          persona: loadPersona(),
+          modePrompt: loadModePrompt(record.mode),
+          model: modelForChannel(useApi, process.env.CLAUDE_MODEL || "claude-opus-4-7"),
+          thinking: false,
+          env: channelEnv(useApi),
+        },
+        {
+          onClaudeSession(id) {
+            // 压缩会派生新的内部会话 id，之后 resume 的就是压完的摘要版
+            record.claudeSessionId = id;
+            store.save(record);
+          },
+          onDelta() {},
+          onTool() {},
+          onDone() {
+            resolve();
+          },
+          onError(message) {
+            reject(new Error(message));
+          },
+        },
+      );
+    });
+  const useApi = useApiNow();
+  return attempt(useApi)
+    .catch((err) => {
+      if (!useApi && getSettings().channel === "auto" && externalConfigured()) {
+        console.error(`[compact] 订阅通道失败（${err instanceof Error ? err.message.slice(0, 120) : err}），换外部 API 重试`);
+        return attempt(true);
+      }
+      throw err;
+    })
+    .finally(() => compacting.delete(record.id));
+}
+
+/** 自动挡：本轮单次上下文（累计输入÷步数）超阈值就顺手瘦身，前端收到小提示，不用她管 */
+function maybeAutoCompact(record: SessionRecord, usage: TurnUsage | undefined, send: (payload: unknown) => void): void {
+  if (!COMPACT_THRESHOLD || !usage?.steps) return;
+  const perStep = Math.round(usage.inputTotal / usage.steps);
+  if (perStep < COMPACT_THRESHOLD) return;
+  console.log(`[compact] 单次上下文约 ${perStep} tokens，超阈值 ${COMPACT_THRESHOLD}，自动给「${record.title}」瘦身`);
+  send({ type: "compact_start", auto: true });
+  runCompact(record).then(
+    () => send({ type: "compact_done" }),
+    (err) => {
+      const message = err instanceof Error ? err.message : String(err);
+      console.error(`[compact] 自动瘦身失败：${message}`);
+      send({ type: "compact_error", message });
+    },
+  );
 }
 
 const server = http.createServer((req, res) => {
@@ -255,6 +330,7 @@ const server = http.createServer((req, res) => {
 
         // 通话有自己的会话（mode=call），记录进历史，聊天页也能翻到
         const record = (url.searchParams.get("session") && store.get(url.searchParams.get("session")!)) || store.create("call");
+        if (compacting.has(record.id)) return sendJson(res, 409, { error: "这个会话正在瘦身，稍等几秒" });
         if (record.messages.length === 0) {
           const d = new Date();
           record.title = `通话 ${d.getMonth() + 1}.${d.getDate()}`;
@@ -438,6 +514,21 @@ const server = http.createServer((req, res) => {
     });
     return;
   }
+  // 会话瘦身（手动挡）：对这个会话发一次 /compact。压大会话要一阵，压完才回话
+  const compactMatch = url.pathname.match(/^\/api\/sessions\/([0-9a-f-]{36})\/compact$/);
+  if (compactMatch && req.method === "POST") {
+    if (!authed(url)) return sendJson(res, 401, { error: "口令不对" });
+    const record = store.get(compactMatch[1]);
+    if (!record) return sendJson(res, 404, { error: "没有这个会话" });
+    if (!record.claudeSessionId) return sendJson(res, 400, { error: "这个会话还没聊过，没东西可压" });
+    if (compacting.has(record.id)) return sendJson(res, 409, { error: "正在瘦身，别重复点" });
+    runCompact(record).then(
+      () => sendJson(res, 200, { ok: true }),
+      (err) => sendJson(res, 502, { error: err instanceof Error ? err.message : String(err) }),
+    );
+    return;
+  }
+
   // 挪文件夹：folder 传空串 = 移出文件夹
   const folderMatch = url.pathname.match(/^\/api\/sessions\/([0-9a-f-]{36})\/folder$/);
   if (folderMatch && req.method === "POST") {
@@ -521,6 +612,7 @@ wss.on("connection", (ws: WebSocket, req) => {
       if (active) return send({ type: "error", message: "上一条还在跑，等等或者先打断" });
       // 拍一拍如果没在已有会话里就新建一个，走默认 chat 模式
       const record = (msg.sessionId && store.get(msg.sessionId)) || store.create();
+      if (compacting.has(record.id)) return send({ type: "error", message: "这个会话正在瘦身，等几秒再拍" });
       // 拍一拍不改标题；存历史用固定文本，前端识别后显示成居中小字
       record.messages.push({ role: "user", text: "（拍了拍你）", at: new Date().toISOString() });
       store.save(record);
@@ -610,6 +702,7 @@ wss.on("connection", (ws: WebSocket, req) => {
 
     // 已有会话不改 mode；只有新建时才认 msg.mode，未指定就默认 chat
     const record = (msg.sessionId && store.get(msg.sessionId)) || store.create(msg.mode || "chat");
+    if (compacting.has(record.id)) return send({ type: "error", message: "这个会话正在瘦身，等几秒再发" });
     if (record.messages.length === 0) {
       record.title = (text || attachments[0]?.name || "新会话").slice(0, 24);
     }
@@ -652,6 +745,7 @@ wss.on("connection", (ws: WebSocket, req) => {
       // 一次发射；auto 通道下订阅这边翻车（还没吐任何内容时）就换外部 API 重打一发
       const launch = (useApi: boolean, isRetry: boolean) => {
         let gotOutput = false; // 已经流出过内容就不能重试了，否则前端会看到重复的半截话
+        let usage: TurnUsage | undefined; // 本轮账单，onDone 时拿去判断要不要自动瘦身
         active = runTurn(
           {
             prompt,
@@ -690,6 +784,9 @@ wss.on("connection", (ws: WebSocket, req) => {
               gotOutput = true;
               send({ type: "tool", name: tool.name, detail: tool.detail });
             },
+            onUsage(u) {
+              usage = u;
+            },
             onDone(finalText, tools, thinking) {
               // 订阅额度耗尽时 CLI 不报错，而是把英文提示当正文吐出来。
               // 只认"短、无工具、命中限额措辞"的组合，避免正经聊到 rate limit 被误杀
@@ -709,6 +806,7 @@ wss.on("connection", (ws: WebSocket, req) => {
               if (!anyoneWatching()) barkPush("麦穗", finalText).catch(() => {});
               // 后台异步提取记忆碎片；不 await、出错不影响主聊天
               scheduleExtractionIfNeeded(record);
+              maybeAutoCompact(record, usage, send);
             },
             onError(message) {
               if (!isRetry && !useApi && getSettings().channel === "auto" && externalConfigured() && !gotOutput) {

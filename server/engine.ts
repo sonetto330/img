@@ -12,6 +12,17 @@ export interface Thinking {
   ms: number;
 }
 
+/** 一轮的 token 账单。注意都是轮内全部 API 调用的累计值，单次上下文 ≈ inputTotal ÷ steps */
+export interface TurnUsage {
+  steps: number;
+  inputTotal: number;
+  cacheRead: number;
+  cacheCreation: number;
+  uncached: number;
+  outputTokens: number;
+  costUsd: number;
+}
+
 export interface TurnCallbacks {
   onClaudeSession(claudeSessionId: string): void;
   onDelta(text: string): void;
@@ -20,6 +31,8 @@ export interface TurnCallbacks {
   /** 一段思考结束（可能有多段，ms 是累计值） */
   onThinkingPause?(ms: number): void;
   onTool(tool: ToolCall): void;
+  /** 本轮 token 账单，result 到达时先于 onDone 调用；不订阅就当没有 */
+  onUsage?(usage: TurnUsage): void;
   onDone(finalText: string, tools: ToolCall[], thinking?: Thinking): void;
   onError(message: string): void;
 }
@@ -170,6 +183,15 @@ export function runTurn(opts: TurnOptions, cb: TurnCallbacks): TurnHandle {
                 `[usage] 本轮 ${msg.num_turns} 步累计输入 ${totalIn}（缓存命中 ${u.cache_read_input_tokens}=${hitPct}% · 写入 ${u.cache_creation_input_tokens} · 全价 ${u.input_tokens}）` +
                   `｜输出 ${u.output_tokens}｜折官方价 $${msg.total_cost_usd.toFixed(4)}`
               );
+              cb.onUsage?.({
+                steps: msg.num_turns,
+                inputTotal: totalIn,
+                cacheRead: u.cache_read_input_tokens,
+                cacheCreation: u.cache_creation_input_tokens,
+                uncached: u.input_tokens,
+                outputTokens: u.output_tokens,
+                costUsd: msg.total_cost_usd,
+              });
             }
             if (msg.subtype === "success") {
               const thinking = thinkingParts.length

@@ -103,6 +103,16 @@ function handle(msg) {
       scrollDown();
       break;
     }
+    // 会话自动瘦身：这轮上下文太重，服务端在后台压缩历史，聊过的都还在
+    case "compact_start":
+      addChanNote("这个会话有点重，正在自动瘦身…压完之后又快又省");
+      break;
+    case "compact_done":
+      addChanNote("瘦身完成");
+      break;
+    case "compact_error":
+      addChanNote(`瘦身没成功：${msg.message}`);
+      break;
     case "error":
       if (msg.message === "口令不对") {
         localStorage.removeItem("home_token");
@@ -375,6 +385,16 @@ function ensureTaHead() {
 }
 
 // —— 界面 ——
+// 居中小字提示条（channel_fallback 同款样式），返回元素方便后面改字
+function addChanNote(text) {
+  const note = document.createElement("div");
+  note.className = "chan-note";
+  note.textContent = text;
+  messagesEl.appendChild(note);
+  scrollDown();
+  return note;
+}
+
 function addBubble(kind, text) {
   const div = document.createElement("div");
   div.className = kind === "me" ? "msg me" : kind === "error" ? "msg error" : "msg ta";
@@ -817,6 +837,13 @@ function openSessMenu(sess, anchor) {
     closeSessMenu();
     doMove(sess);
   };
+  const slim = document.createElement("button");
+  slim.textContent = "瘦身";
+  slim.onclick = (e) => {
+    e.stopPropagation();
+    closeSessMenu();
+    doCompact(sess);
+  };
   const del = document.createElement("button");
   del.className = "danger";
   del.textContent = "删除";
@@ -825,7 +852,7 @@ function openSessMenu(sess, anchor) {
     closeSessMenu();
     doDelete(sess);
   };
-  menu.append(rename, move, del);
+  menu.append(rename, move, slim, del);
   anchor.appendChild(menu);
   openMenu = menu;
   // 点别处关掉
@@ -860,6 +887,21 @@ async function doMove(sess) {
   });
   if (!res.ok) return addBubble("error", "移动失败");
   loadSessions();
+}
+
+// 瘦身（手动挡）：让服务端对这个会话做一次 /compact，历史压成摘要
+async function doCompact(sess) {
+  if (!confirm(`给「${sess.title}」瘦身？\n聊天历史会压成摘要：聊过什么、定过什么都还在，但发过的大文件原文会被压掉。压完之后每轮又快又省。`)) return;
+  const note = addChanNote(`「${sess.title}」正在瘦身，大会话要压一阵，别关页面…`);
+  try {
+    const res = await fetch(`/api/sessions/${sess.id}/compact?token=${encodeURIComponent(token)}`, { method: "POST" });
+    const body = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(body.error || "服务器没接住");
+    note.textContent = `「${sess.title}」瘦身完成`;
+  } catch (e) {
+    note.textContent = `瘦身没成功：${e.message}`;
+  }
+  scrollDown();
 }
 
 async function doDelete(sess) {
