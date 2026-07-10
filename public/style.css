@@ -142,7 +142,7 @@ header button#backHome { font-size: 18px; }
 
 /* Markdown 渲染后的气泡 */
 .msg.md { white-space: normal; }
-.msg.md p, .msg.md ul, .msg.md ol, .msg.md pre, .msg.md blockquote, .msg.md h1, .msg.md h2, .msg.md h3 { margin: 0 0 8px; }
+.msg.md p, .msg.md ul, .msg.md ol, .msg.md pre, .msg.md blockquote, .msg.md h1, .msg.md h2, .msg.md h3 { margin: 0 0 14px; }
 .msg.md > :last-child { margin-bottom: 0; }
 .msg.md ul, .msg.md ol { padding-left: 20px; }
 .msg.md h1, .msg.md h2, .msg.md h3 { font-size: 16px; }
