@@ -76,7 +76,7 @@ header button#backHome { font-size: 18px; }
   touch-action: manipulation; /* iOS 别拿双击去缩放 */
 }
 .who-text h1 {
-  font-family: var(--kai); font-size: 18px; font-weight: 500;
+  font-family: var(--kai); font-size: 19px; font-weight: 500;
   color: var(--name); letter-spacing: 1.5px; line-height: 1.2;
 }
 .who-text h1 i {
@@ -130,7 +130,7 @@ header button#backHome { font-size: 18px; }
   display: flex; align-items: baseline; gap: 10px;
   margin: 10px 0 -2px;
 }
-.ta-head span { font-size: 19px; font-weight: 500; color: var(--name); letter-spacing: 1.5px; font-family: var(--kai); }
+.ta-head span { font-size: 20px; font-weight: 500; color: var(--name); letter-spacing: 1.5px; font-family: var(--kai); }
 .ta-head time { font-size: 11.5px; color: var(--muted); letter-spacing: .8px; font-family: var(--kai); }
 .msg.error { align-self: center; background: #fbe9e4; color: #a33f22; font-size: 13px; border-radius: 10px; }
 .msg.pat { align-self: center; background: none; color: var(--muted); font-size: 12px; padding: 4px 12px; }
