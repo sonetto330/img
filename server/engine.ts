@@ -156,6 +156,21 @@ export function runTurn(opts: TurnOptions, cb: TurnCallbacks): TurnHandle {
             break;
           case "result":
             closeThinkingSpan();
+            // 每轮 usage 打到服务端控制台：缓存吃上没有、钱花在哪，一眼可见。
+            // 缓存命中价 0.1 倍、写入 1.25 倍、全价新读 1 倍；命中占比越高越省。
+            // 走中转时 total_cost_usd 是按官方价折算的参考值，不等于中转实扣。
+            {
+              const u = msg.usage;
+              const totalIn = u.input_tokens + u.cache_read_input_tokens + u.cache_creation_input_tokens;
+              const hitPct = totalIn ? Math.round((u.cache_read_input_tokens / totalIn) * 100) : 0;
+              // usage 是本轮内部所有 API 调用的累加：模型每动一次工具就重读一遍
+              // 全部上下文，步数越多累计越大。单次上下文 ≈ 累计 ÷ 步数，别按累计数
+              // 判断窗口大小。
+              console.log(
+                `[usage] 本轮 ${msg.num_turns} 步累计输入 ${totalIn}（缓存命中 ${u.cache_read_input_tokens}=${hitPct}% · 写入 ${u.cache_creation_input_tokens} · 全价 ${u.input_tokens}）` +
+                  `｜输出 ${u.output_tokens}｜折官方价 $${msg.total_cost_usd.toFixed(4)}`
+              );
+            }
             if (msg.subtype === "success") {
               const thinking = thinkingParts.length
                 ? { text: thinkingParts.join(""), ms: thinkingMs }
