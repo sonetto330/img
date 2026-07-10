@@ -36,7 +36,24 @@ export interface ModeDef {
  * 跑团（trpg）、旅行（travel）等在后续期数补上，本期只有 chat。
  */
 const MODES: Record<string, ModeDef> = {
-  chat: { id: "chat", label: "聊天" },
+  chat: {
+    id: "chat",
+    label: "聊天",
+    // Chrome 浏览器工具：直连泽日常的 Chrome（144+ 需在 chrome://inspect/#remote-debugging
+    // 开过"远程调试"开关；没开或 Chrome 没运行时该组工具连不上，聊天本身不受影响）
+    buildTools: () => ({
+      mcpServers: {
+        chrome: {
+          type: "stdio",
+          command: process.execPath,
+          args: [
+            path.join(root, "node_modules", "chrome-devtools-mcp", "build", "src", "bin", "chrome-devtools-mcp.js"),
+            "--autoConnect",
+          ],
+        },
+      },
+    }),
+  },
   // 语音通话：不走 WS 聊天流，由 /api/call/turn 单独驱动，提示词管住"说话"的分寸
   call: { id: "call", label: "通话", promptFile: "call.md" },
 };
