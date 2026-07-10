@@ -37,7 +37,7 @@ export interface TurnOptions {
   persona?: string;
   /** 当前会话模式的附加提示词，接在人设之后；不填就没这一层 */
   modePrompt?: string;
-  /** 从记忆库检索出来的相关碎片块，接在模式提示词之后；不填就没这一层 */
+  /** 从记忆库检索出来的相关碎片块，拼进用户消息开头；不填就没这一层 */
   memoryBlock?: string;
   /** 当前模式挂载的 SDK MCP 工具 */
   mcpServers?: Options["mcpServers"];
@@ -49,7 +49,7 @@ export interface TurnOptions {
   maxTurns?: number;
   /** 是否开思考；开了模型自己决定想多少（adaptive） */
   thinking?: boolean;
-  /** 当前时间的人话字符串，注入系统提示，让他知道现在几点 */
+  /** 当前时间的人话字符串，拼进用户消息开头，让他知道现在几点 */
   now?: string;
   /**
    * 传给 CLI 子进程的完整环境变量（settings.channelEnv 算出来的）。
@@ -59,24 +59,32 @@ export interface TurnOptions {
 }
 
 export function runTurn(opts: TurnOptions, cb: TurnCallbacks): TurnHandle {
-  // 组装系统提示 append 层：人设 → 模式提示词 → 记忆碎片，缺哪层就跳哪层
-  const appendParts: string[] = [];
+  // 时间和记忆块拼进用户消息，不进系统提示：系统提示每轮变一个字（时间到分钟、
+  // 检索碎片轮轮不同），提示词缓存就从头作废，整段历史重读，长会话起步要几十秒。
+  // 放进消息里历史只往后长、前缀不动，缓存轮轮命中。
+  const reminderParts: string[] = [];
   if (opts.now) {
-    appendParts.push(`现在的时间：${opts.now}。你没有别的报时渠道，说到时间以这个为准。`);
+    reminderParts.push(`现在的时间：${opts.now}。你没有别的报时渠道，说到时间以这个为准。`);
   }
+  if (opts.memoryBlock) {
+    reminderParts.push(opts.memoryBlock);
+  }
+  const prompt = reminderParts.length
+    ? `<system-reminder>\n${reminderParts.join("\n\n")}\n</system-reminder>\n\n${opts.prompt}`
+    : opts.prompt;
+
+  // 系统提示 append 只放不随轮次变的稳定层：人设 → 模式提示词
+  const appendParts: string[] = [];
   if (opts.persona) {
     appendParts.push(`以下是你的身份设定，任何时候都遵守：\n\n${opts.persona}`);
   }
   if (opts.modePrompt) {
     appendParts.push(`当前对话模式的补充要求：\n\n${opts.modePrompt}`);
   }
-  if (opts.memoryBlock) {
-    appendParts.push(opts.memoryBlock);
-  }
   const append = appendParts.length ? "\n" + appendParts.join("\n\n") : undefined;
 
   const q = query({
-    prompt: opts.prompt,
+    prompt,
     options: {
       cwd: opts.cwd,
       resume: opts.resume,
