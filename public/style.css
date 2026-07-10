@@ -32,7 +32,7 @@
   --kai: "KingHwa_OldSong", Georgia, "Kaiti SC", "STKaiti", "KaiTi", "DFKai-SB", serif;
   /* 聊天正文（官端同款配方）：西文衬线管数字英文，中文落到系统宋体——
      iPhone 上是宋体-简（跟 Claude 官方 app 一个效果），Windows 上退到中易宋体 */
-  --prose: "Times New Roman", "Songti SC", "STSong", "SimSun", serif;
+  --prose: ui-serif, Georgia, "Songti SC", "STSong", "SimSun", serif;
 }
 
 html, body { height: 100%; }
@@ -145,7 +145,7 @@ header button#backHome { font-size: 18px; }
 
 /* Markdown 渲染后的气泡 */
 .msg.md { white-space: normal; }
-.msg.md p, .msg.md ul, .msg.md ol, .msg.md pre, .msg.md blockquote, .msg.md h1, .msg.md h2, .msg.md h3 { margin: 0 0 14px; }
+.msg.md p, .msg.md ul, .msg.md ol, .msg.md pre, .msg.md blockquote, .msg.md h1, .msg.md h2, .msg.md h3 { margin: 0 0 18px; }
 .msg.md > :last-child { margin-bottom: 0; }
 .msg.md ul, .msg.md ol { padding-left: 20px; }
 .msg.md h1, .msg.md h2, .msg.md h3 { font-size: 16px; }
