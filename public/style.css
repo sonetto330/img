@@ -104,7 +104,7 @@ header button#backHome { font-size: 18px; }
   /* 手机两侧至少 26px 留白，读起来像书页不是报表 */
   padding: 18px max(26px, calc((100% - 700px) / 2)) 10px;
   display: flex; flex-direction: column; gap: 12px;
-  font-family: var(--kai);
+  /* 正文用回系统无衬线：老宋体手机上大段阅读费眼（泽 7/10 实测）；名字、时间戳单独留宋 */
 }
 
 .msg {
@@ -130,13 +130,13 @@ header button#backHome { font-size: 18px; }
   display: flex; align-items: baseline; gap: 10px;
   margin: 10px 0 -2px;
 }
-.ta-head span { font-size: 19px; font-weight: 500; color: var(--name); letter-spacing: 1.5px; }
-.ta-head time { font-size: 11.5px; color: var(--muted); letter-spacing: .8px; }
+.ta-head span { font-size: 19px; font-weight: 500; color: var(--name); letter-spacing: 1.5px; font-family: var(--kai); }
+.ta-head time { font-size: 11.5px; color: var(--muted); letter-spacing: .8px; font-family: var(--kai); }
 .msg.error { align-self: center; background: #fbe9e4; color: #a33f22; font-size: 13px; border-radius: 10px; }
 .msg.pat { align-self: center; background: none; color: var(--muted); font-size: 12px; padding: 4px 12px; }
 .msg.stamp {
   align-self: center; background: none; color: var(--muted);
-  font-size: 11px; padding: 2px 12px; letter-spacing: .4px;
+  font-size: 11px; padding: 2px 12px; letter-spacing: .4px; font-family: var(--kai);
   user-select: none; -webkit-user-select: none;
 }
 
