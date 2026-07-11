@@ -8,6 +8,7 @@ import type { Options } from "@anthropic-ai/claude-agent-sdk";
 import { randomUUID } from "node:crypto";
 import { SessionStore, type Attachment, type SessionRecord } from "./sessions.js";
 import { runTurn, type TurnHandle, type TurnUsage } from "./engine.js";
+import { burnAttachments } from "./burn.js";
 import { getMode, loadModePrompt, type ToolEvent } from "./modes.js";
 import { buildHistoryTools } from "./history.js";
 import { barkPush } from "./bark.js";
@@ -85,6 +86,23 @@ function sendJson(res: http.ServerResponse, status: number, body: unknown): void
 
 // 正在瘦身的会话：压缩期间 resume 旧 id 会 fork 出没压缩的分支，新消息必须挡住
 const compacting = new Set<string>();
+
+/**
+ * 阅后即焚：resume 之前把上一轮 Read 过的附件原文从内部历史里替换成占位符。
+ * 放在 resume 前做（而不是回话后）就没有和子进程写文件的并发问题——同一
+ * 会话的轮次是串行的。焚失败不挡聊天，最多这轮多背点原文。
+ */
+function burnBeforeResume(record: SessionRecord): void {
+  if (!record.claudeSessionId) return;
+  try {
+    const r = burnAttachments(record.claudeSessionId, WORKSPACE, UPLOADS);
+    if (r.burned) {
+      console.log(`[burn] 「${record.title}」阅后即焚 ${r.burned} 块附件原文，历史瘦了约 ${Math.round(r.savedChars / 1024)}K 字符`);
+    }
+  } catch (err) {
+    console.error(`[burn] ${err instanceof Error ? err.message : err}`);
+  }
+}
 
 /**
  * 给会话做一次 /compact：SDK 把历史压成摘要，聊过什么、定过什么都在，
@@ -337,6 +355,7 @@ const server = http.createServer((req, res) => {
         }
         record.messages.push({ role: "user", text: userText, at: new Date().toISOString() });
         store.save(record);
+        burnBeforeResume(record);
 
         // 说一轮：不动工具、不开思考，快点回话要紧；auto 通道下订阅翻车就换外部 API 再试一次
         const speak = (useApi: boolean) =>
@@ -618,6 +637,8 @@ wss.on("connection", (ws: WebSocket, req) => {
       store.save(record);
       send({ type: "session", sessionId: record.id, title: record.title, mode: record.mode });
 
+      burnBeforeResume(record);
+
       // 拍一拍不动工具，就不装 mcpServers；模式提示词还是照常挂
       // auto 通道下订阅翻车（还没吐内容时）就换外部 API 重拍一次，跟主聊天同款逻辑
       const launchPat = (useApi: boolean, isRetry: boolean) => {
@@ -741,6 +762,8 @@ wss.on("connection", (ws: WebSocket, req) => {
         console.error(`[librarian] ${err instanceof Error ? err.message : err}`);
       }
       if (active !== preparing) return; // 中途被 close/interrupt 换掉了，别继续
+
+      burnBeforeResume(record);
 
       // 一次发射；auto 通道下订阅这边翻车（还没吐任何内容时）就换外部 API 重打一发
       const launch = (useApi: boolean, isRetry: boolean) => {
