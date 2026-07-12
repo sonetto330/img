@@ -199,10 +199,19 @@ export function runTurn(opts: TurnOptions, cb: TurnCallbacks): TurnHandle {
               // usage 是本轮内部所有 API 调用的累加：模型每动一次工具就重读一遍
               // 全部上下文，步数越多累计越大。单次上下文 ≈ 累计 ÷ 步数，别按累计数
               // 判断窗口大小。
-              console.log(
-                `[usage] 本轮 ${msg.num_turns} 步累计输入 ${totalIn}（缓存命中 ${u.cache_read_input_tokens}=${hitPct}% · 写入 ${u.cache_creation_input_tokens} · 全价 ${u.input_tokens}）` +
-                  `｜输出 ${u.output_tokens}｜折官方价 $${msg.total_cost_usd.toFixed(4)}｜全程 ${((Date.now() - t0) / 1000).toFixed(1)}s`
-              );
+              if (!totalIn && msg.total_cost_usd > 0) {
+                // 斜杠命令轮（/compact 等）：SDK 的 result.usage 不含内部压缩调用的
+                // tokens，全 0 是统计盲区不是没花——total_cost_usd 是记了的，以它为准。
+                console.log(
+                  `[usage] 斜杠命令轮：tokens 未计入 SDK 统计（全价重读整段历史再写摘要，只有钱数是真的）` +
+                    `｜折官方价 $${msg.total_cost_usd.toFixed(4)}｜全程 ${((Date.now() - t0) / 1000).toFixed(1)}s`
+                );
+              } else {
+                console.log(
+                  `[usage] 本轮 ${msg.num_turns} 步累计输入 ${totalIn}（缓存命中 ${u.cache_read_input_tokens}=${hitPct}% · 写入 ${u.cache_creation_input_tokens} · 全价 ${u.input_tokens}）` +
+                    `｜输出 ${u.output_tokens}｜折官方价 $${msg.total_cost_usd.toFixed(4)}｜全程 ${((Date.now() - t0) / 1000).toFixed(1)}s`
+                );
+              }
               cb.onUsage?.({
                 steps: msg.num_turns,
                 inputTotal: totalIn,
