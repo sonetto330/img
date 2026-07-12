@@ -30,7 +30,8 @@ function snippet(text: string, term: string): string {
   return `${start > 0 ? "…" : ""}${text.slice(start, end).replace(/\s+/g, " ")}${end < text.length ? "…" : ""}`;
 }
 
-export function buildHistoryTools(store: SessionStore, currentSessionId: string) {
+export function buildHistoryTools(store: SessionStore, currentSessionId: string, archiveStore?: SessionStore) {
+  const stores = archiveStore ? [store, archiveStore] : [store];
   const searchTool = tool(
     "search_history",
     "跨窗口搜索你和泽的历史聊天原文。你们的每个会话窗口彼此独立，记忆碎片只有梗概——想找一句原话、她说'我之前跟你说过'而你没印象、或需要确认以前聊过的细节时，用这个搜。返回命中消息的片段和位置，想看前后文再用 read_history。",
@@ -44,9 +45,9 @@ export function buildHistoryTools(store: SessionStore, currentSessionId: string)
       const limit = args.limit ?? MAX_HITS;
 
       const hits: Array<{ at: string; line: string }> = [];
-      for (const meta of store.list()) {
+      for (const s of stores) for (const meta of s.list()) {
         if (meta.id === currentSessionId) continue; // 当前窗口的内容本来就在上下文里
-        const record = store.get(meta.id);
+        const record = s.get(meta.id);
         if (!record) continue;
         for (let i = 0; i < record.messages.length; i++) {
           const m = record.messages[i];
@@ -77,7 +78,8 @@ export function buildHistoryTools(store: SessionStore, currentSessionId: string)
       span: z.number().int().min(1).max(10).optional().describe("往前后各取几条，默认 3"),
     },
     async (args) => {
-      const record = store.get(args.sessionId);
+      let record = null;
+      for (const s of stores) if ((record = s.get(args.sessionId))) break;
       if (!record) return { content: [{ type: "text" as const, text: "没有这个会话（id 不对或已被删除）" }] };
       const span = args.span ?? 3;
       const from = Math.max(0, args.index - span);

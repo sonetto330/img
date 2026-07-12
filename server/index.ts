@@ -50,6 +50,8 @@ const MAX_UPLOAD = 200 * 1024 * 1024; // 200MB，泽要传字体文件这类大�
 const IMAGE_EXT = new Set([".png", ".jpg", ".jpeg", ".gif", ".webp"]);
 
 const store = new SessionStore(DATA_DIR);
+// chat 端老记录的只读存档（scripts/import-chat-archive.mjs 灌入），只喂给翻历史工具，不进会话列表
+const archiveStore = new SessionStore(path.join(DATA_DIR, "archive"));
 const publicDir = path.join(root, "public");
 
 const MIME: Record<string, string> = {
@@ -869,7 +871,7 @@ wss.on("connection", (ws: WebSocket, req) => {
           const emitRef: PoolEntry["emitRef"] = { send: () => {} };
           const built = getMode(record.mode).buildTools?.((event: ToolEvent) => emitRef.send({ type: "custom", event }));
           // 跨窗口翻历史：所有聊天会话都挂上，麦穗想不起原话时自己去搜别的窗口
-          const history = buildHistoryTools(store, record.id);
+          const history = buildHistoryTools(store, record.id, archiveStore);
           const newEntry: PoolEntry = {
             useApi,
             emitRef,
