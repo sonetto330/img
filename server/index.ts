@@ -7,7 +7,7 @@ import { WebSocketServer, type WebSocket } from "ws";
 import type { Options } from "@anthropic-ai/claude-agent-sdk";
 import { randomUUID } from "node:crypto";
 import { SessionStore, type Attachment, type SessionRecord } from "./sessions.js";
-import { runTurn, type TurnHandle, type TurnUsage } from "./engine.js";
+import { runTurn, PersistentSession, type TurnHandle, type TurnUsage } from "./engine.js";
 import { burnAttachments } from "./burn.js";
 import { splitApiError, apiErrorNote } from "./apierror.js";
 import { getMode, loadModePrompt, type ToolEvent } from "./modes.js";
@@ -89,6 +89,69 @@ function sendJson(res: http.ServerResponse, status: number, body: unknown): void
 const compacting = new Set<string>();
 
 /**
+ * 常驻会话池：会话 id → 活着的 CLI 进程。聊天热路径直接往进程的输入流里推
+ * 消息，历史在进程内存里不重读，冷启动税从"每条消息一次"变成"每次进程启动
+ * 一次"。第一阶段只给聊天上常驻；拍一拍/通话/compact 走老的 resume 路——但
+ * 它们 resume 之前必须先把同会话的常驻进程收干净，不然会 fork 出分叉历史。
+ */
+interface PoolEntry {
+  session: PersistentSession;
+  /** 进程起来时走的通道；设置变了对不上就得重开 */
+  useApi: boolean;
+  /** 自定义工具事件的转发出口：手机重连后指到新的 WS 连接，旧闭包照样能送到 */
+  emitRef: { send: (payload: unknown) => void };
+  idleTimer?: NodeJS.Timeout;
+  /** 回收到点时还 busy 的记账：连续两个周期都没等到空闲，多半是轮子卡死了，强制收 */
+  busyStrike?: boolean;
+}
+const pool = new Map<string, PoolEntry>();
+// 闲置多久回收常驻进程（释放内存）；下次消息再冷启动 resume
+const POOL_IDLE_MS = Math.max(1, Number(process.env.PERSIST_IDLE_MINUTES || 15)) * 60_000;
+
+/** 每推一轮就把闲置回收的表拨回去；到点了还在干活就再等一个周期（最多宽限一次） */
+function touchPool(id: string, entry: PoolEntry): void {
+  entry.busyStrike = false;
+  scheduleIdleReap(id, entry);
+}
+
+function scheduleIdleReap(id: string, entry: PoolEntry): void {
+  clearTimeout(entry.idleTimer);
+  entry.idleTimer = setTimeout(() => {
+    if (pool.get(id) !== entry) return;
+    if (entry.session.busy && !entry.busyStrike) {
+      entry.busyStrike = true; // 一轮真跑超 15 分钟的情况罕见；再给一个周期，还 busy 就当卡死
+      return scheduleIdleReap(id, entry);
+    }
+    console.log(
+      entry.session.busy
+        ? `[pool] 常驻进程 busy 卡了两个周期，多半死了，强制回收`
+        : `[pool] 会话闲置超 ${POOL_IDLE_MS / 60000} 分钟，回收常驻进程（下次消息 resume 冷启动）`
+    );
+    void dropPooled(id);
+  }, POOL_IDLE_MS);
+  entry.idleTimer.unref?.();
+}
+
+/**
+ * 收掉并移除某会话的常驻进程。resolve 时进程已退出、内部历史 jsonl 落盘，
+ * 之后对这个内部会话 resume（compact/拍一拍/通话/下次冷启动）才安全。
+ */
+async function dropPooled(id: string): Promise<void> {
+  const entry = pool.get(id);
+  if (!entry) return;
+  pool.delete(id);
+  clearTimeout(entry.idleTimer);
+  await entry.session.close();
+}
+
+/** 通道或外部 API 配置一变就全清：进程的环境变量是启动时定死的，旧进程还挂着旧通道 */
+function clearPool(reason: string): void {
+  if (!pool.size) return;
+  console.log(`[pool] ${reason}，清空 ${pool.size} 个常驻进程，下次消息按新配置冷启动`);
+  for (const id of [...pool.keys()]) void dropPooled(id);
+}
+
+/**
  * 阅后即焚：resume 之前把上一轮 Read 过的附件原文从内部历史里替换成占位符。
  * 放在 resume 前做（而不是回话后）就没有和子进程写文件的并发问题——同一
  * 会话的轮次是串行的。焚失败不挡聊天，最多这轮多背点原文。
@@ -150,7 +213,12 @@ function runCompact(record: SessionRecord): Promise<void> {
       );
     });
   const useApi = useApiNow();
-  return attempt(useApi)
+  // 常驻进程活着时不能直接 resume 压缩（会 fork 出没压缩的分支，进程里还留着
+  // 旧历史继续跑，两边就岔开了）——先收进程，等它退干净、jsonl 落盘再压。
+  // 往常驻流里直接发 /compact 理论上也行，但会派生新内部会话 id 的行为没实测
+  // 过，第一阶段用"收掉再压"这条稳路，代价只是压完后下条消息多付一次冷启动。
+  return dropPooled(record.id)
+    .then(() => attempt(useApi))
     .catch((err) => {
       if (!useApi && getSettings().channel === "auto" && externalConfigured()) {
         console.error(`[compact] 订阅通道失败（${err instanceof Error ? err.message.slice(0, 120) : err}），换外部 API 重试`);
@@ -304,6 +372,9 @@ const server = http.createServer((req, res) => {
           }
           setChannel(channel);
         }
+        // 通道/外部配置是进程启动时注入环境变量定死的，改了就得让常驻进程全部重开，
+        // 否则会出现"切了通道但没生效"的鬼故事
+        if (hasExternalField || body.channel !== undefined) clearPool("调用通道配置变了");
         return sendJson(res, 200, publicSettings());
       });
       return;
@@ -359,6 +430,8 @@ const server = http.createServer((req, res) => {
         }
         record.messages.push({ role: "user", text: userText, at: new Date().toISOString() });
         store.save(record);
+        // 通话走老的 resume 路：同会话有常驻进程时先收干净，防止 fork 分叉
+        await dropPooled(record.id);
         burnBeforeResume(record);
 
         // 说一轮：不动工具、不开思考，快点回话要紧；auto 通道下订阅翻车就换外部 API 再试一次
@@ -644,8 +717,6 @@ wss.on("connection", (ws: WebSocket, req) => {
       store.save(record);
       send({ type: "session", sessionId: record.id, title: record.title, mode: record.mode });
 
-      burnBeforeResume(record);
-
       // 拍一拍不动工具，就不装 mcpServers；模式提示词还是照常挂
       // auto 通道下订阅翻车（还没吐内容时）就换外部 API 重拍一次，跟主聊天同款逻辑
       const launchPat = (useApi: boolean, isRetry: boolean) => {
@@ -713,7 +784,11 @@ wss.on("connection", (ws: WebSocket, req) => {
           },
         );
       };
-      launchPat(useApiNow(), false);
+      // 拍一拍走老的 resume 路：同会话有常驻进程时先收干净再拍，防止 fork 分叉
+      void dropPooled(record.id).then(() => {
+        burnBeforeResume(record);
+        launchPat(useApiNow(), false);
+      });
       return;
     }
 
@@ -751,15 +826,6 @@ wss.on("connection", (ws: WebSocket, req) => {
       .join("\n");
     const prompt = attLines ? `${attLines}\n\n${text || "（没写字，看内容吧）"}` : text;
 
-    // 装配当前模式的工具：emit 闭包直接把事件推给这条 WS 连接
-    const emit = (event: ToolEvent) => send({ type: "custom", event });
-    const built = getMode(record.mode).buildTools?.(emit);
-    // 跨窗口翻历史：所有聊天会话都挂上，麦穗想不起原话时自己去搜别的窗口
-    const history = buildHistoryTools(store, record.id);
-    const mcpServers = { ...history.mcpServers, ...built?.mcpServers };
-    // 模式没限制白名单就保持全放开（undefined），别因为挂了历史工具反而把 Read/Bash 锁没了
-    const allowedTools = built?.allowedTools ? [...built.allowedTools, ...history.allowedTools] : undefined;
-
     // 检索记忆：全模式生效。await 期间用一个占位 handle 锁住 active，防止连发消息触发并发
     const preparing: TurnHandle = { interrupt: async () => {} };
     active = preparing;
@@ -777,35 +843,73 @@ wss.on("connection", (ws: WebSocket, req) => {
       }
       if (active !== preparing) return; // 中途被 close/interrupt 换掉了，别继续
 
-      burnBeforeResume(record);
-
-      // 一次发射；auto 通道下订阅这边翻车（还没吐任何内容时）就换外部 API 重打一发
-      const launch = (useApi: boolean, isRetry: boolean) => {
+      // 聊天走常驻会话池：池里有活进程就直接往流里推，没有就冷启动一个。
+      // auto 通道下订阅翻车（还没吐任何内容时）换外部 API 重打一发——launch 自己
+      // 会发现池里进程的通道对不上，收掉重开。
+      const launch = async (useApi: boolean, isRetry: boolean): Promise<void> => {
         let gotOutput = false; // 已经流出过内容就不能重试了，否则前端会看到重复的半截话
         let usage: TurnUsage | undefined; // 本轮账单，onDone 时拿去判断要不要自动瘦身
-        active = runTurn(
+
+        let entry = pool.get(record.id);
+        if (entry && (!entry.session.alive || entry.useApi !== useApi)) {
+          // 死了、或通道对不上：收干净（等 jsonl 落盘）再冷启动，别 resume 出分叉
+          await dropPooled(record.id);
+          entry = undefined;
+        }
+        if (entry?.session.busy) {
+          active = null;
+          return send({ type: "error", message: "上一条还在跑，等等或者先打断" });
+        }
+        if (!entry) {
+          // 冷启动。resume 前照常焚附件原文（常驻期间历史在进程内存里，不重读文件，
+          // 焚不焚无所谓——阅后即焚降级成冷启动路径的优化）
+          burnBeforeResume(record);
+          // 自定义工具事件走 emitRef 中转：进程比 WS 连接活得久，手机重连后把出口
+          // 指到新连接，模式工具的旧闭包照样能把事件送到眼前的窗口
+          const emitRef: PoolEntry["emitRef"] = { send: () => {} };
+          const built = getMode(record.mode).buildTools?.((event: ToolEvent) => emitRef.send({ type: "custom", event }));
+          // 跨窗口翻历史：所有聊天会话都挂上，麦穗想不起原话时自己去搜别的窗口
+          const history = buildHistoryTools(store, record.id);
+          const newEntry: PoolEntry = {
+            useApi,
+            emitRef,
+            session: new PersistentSession({
+              cwd: WORKSPACE,
+              permissionMode: PERMISSION_MODE,
+              persona: loadPersona(),
+              modePrompt: loadModePrompt(record.mode),
+              mcpServers: { ...history.mcpServers, ...built?.mcpServers },
+              // 模式没限制白名单就保持全放开（undefined），别因为挂了历史工具反而把 Read/Bash 锁没了
+              allowedTools: built?.allowedTools ? [...built.allowedTools, ...history.allowedTools] : undefined,
+              model: modelForChannel(useApi, model),
+              // 开自适应思考：闲聊模型基本不想，干活才想，想了前端就有卡片看
+              thinking: process.env.THINKING !== "off",
+              env: channelEnv(useApi),
+              resume: record.claudeSessionId,
+              onSessionId(id) {
+                // init 给一次；常驻期间内部换 id（compact 之类）也从这里跟上
+                record.claudeSessionId = id;
+                store.save(record);
+              },
+              onExit() {
+                if (pool.get(record.id) === newEntry) {
+                  clearTimeout(newEntry.idleTimer);
+                  pool.delete(record.id);
+                }
+              },
+            }),
+          };
+          pool.set(record.id, newEntry);
+          entry = newEntry;
+        }
+        // 事件出口指到"现在这条"连接；闲置回收的表拨回去
+        entry.emitRef.send = send;
+        touchPool(record.id, entry);
+
+        active = entry.session.sendTurn(
+          // 时间、记忆块、模型都是随轮次变的，每轮传；模型变了 sendTurn 会先 setModel
+          { prompt, memoryBlock, now: nowString(), model: modelForChannel(useApi, model) },
           {
-            prompt,
-            resume: record.claudeSessionId,
-            cwd: WORKSPACE,
-            permissionMode: PERMISSION_MODE,
-            persona: loadPersona(),
-            modePrompt: loadModePrompt(record.mode),
-            memoryBlock,
-            model: modelForChannel(useApi, model),
-            mcpServers,
-            allowedTools,
-            // 开自适应思考：闲聊模型基本不想，干活才想，想了前端就有卡片看
-            thinking: process.env.THINKING !== "off",
-            now: nowString(),
-            env: channelEnv(useApi),
-          },
-          {
-            onClaudeSession(claudeSessionId) {
-              // Claude Code 每次 resume 会派生新的内部会话 id，得跟着更新
-              record.claudeSessionId = claudeSessionId;
-              store.save(record);
-            },
             onDelta(text) {
               gotOutput = true;
               send({ type: "delta", text });
@@ -833,7 +937,7 @@ wss.on("connection", (ws: WebSocket, req) => {
               ) {
                 console.error(`[channel] 订阅额度用尽（${finalText.slice(0, 80)}），换外部 API 重试`);
                 send({ type: "channel_fallback" });
-                launch(true, true);
+                void launch(true, true);
                 return;
               }
               active = null;
@@ -856,7 +960,7 @@ wss.on("connection", (ws: WebSocket, req) => {
               if (!isRetry && !useApi && getSettings().channel === "auto" && externalConfigured() && !gotOutput) {
                 console.error(`[channel] 订阅通道失败（${message.slice(0, 120)}），换外部 API 重试`);
                 send({ type: "channel_fallback" });
-                launch(true, true);
+                void launch(true, true);
                 return;
               }
               active = null;
@@ -866,8 +970,8 @@ wss.on("connection", (ws: WebSocket, req) => {
           },
         );
       };
-      launch(useApiNow(), false);
-      // runTurn 已经启动，注入成功——把 read_count 打一记；即便本轮失败，"翻过牌"这件事也算数
+      await launch(useApiNow(), false);
+      // 这轮已经推进常驻流，注入成功——把 read_count 打一记；即便本轮失败，"翻过牌"这件事也算数
       if (memoryIds.length) markRetrieved(memoryIds);
     })();
   });
