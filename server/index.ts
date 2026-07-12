@@ -9,6 +9,7 @@ import { randomUUID } from "node:crypto";
 import { SessionStore, type Attachment, type SessionRecord } from "./sessions.js";
 import { runTurn, type TurnHandle, type TurnUsage } from "./engine.js";
 import { burnAttachments } from "./burn.js";
+import { splitApiError, apiErrorNote } from "./apierror.js";
 import { getMode, loadModePrompt, type ToolEvent } from "./modes.js";
 import { buildHistoryTools } from "./history.js";
 import { barkPush } from "./bark.js";
@@ -136,8 +137,11 @@ function runCompact(record: SessionRecord): Promise<void> {
           },
           onDelta() {},
           onTool() {},
-          onDone() {
-            resolve();
+          onDone(finalText) {
+            // CLI 把 API 报错当正文吐出来时压缩其实没做，不能当成功，否则下轮还背着全量历史
+            const { apiError } = splitApiError(finalText);
+            if (apiError) reject(new Error(apiErrorNote(apiError)));
+            else resolve();
           },
           onError(message) {
             reject(new Error(message));
@@ -382,7 +386,10 @@ const server = http.createServer((req, res) => {
                 onDelta() {},
                 onTool() {},
                 onDone(finalText) {
-                  resolve(finalText);
+                  // API 报错被 CLI 当正文吐出来的情况：剥掉；一句真话都不剩就算这轮失败
+                  const { clean, apiError } = splitApiError(finalText);
+                  if (apiError && !clean) reject(new Error(apiErrorNote(apiError)));
+                  else resolve(clean);
                 },
                 onError(message) {
                   reject(new Error(message));
@@ -680,10 +687,17 @@ wss.on("connection", (ws: WebSocket, req) => {
                 return;
               }
               active = null;
-              record.messages.push({ role: "assistant", text: finalText, tools, at: new Date().toISOString() });
-              store.save(record);
-              send({ type: "done", text: finalText });
-              if (!anyoneWatching()) barkPush("麦穗", finalText).catch(() => {});
+              const { clean, apiError } = splitApiError(finalText);
+              if (apiError) {
+                console.error(`[pat] CLI 把 API 报错当正文吐了：${apiError.slice(0, 160)}`);
+                send({ type: "error", message: apiErrorNote(apiError) });
+              }
+              if (clean) {
+                record.messages.push({ role: "assistant", text: clean, tools, at: new Date().toISOString() });
+                store.save(record);
+              }
+              send({ type: "done", text: clean });
+              if (!anyoneWatching()) barkPush(apiError ? "麦穗（出错）" : "麦穗", clean || apiError || "这轮没说出话").catch(() => {});
             },
             onError(message) {
               if (!isRetry && !useApi && getSettings().channel === "auto" && externalConfigured() && !gotOutput) {
@@ -823,12 +837,19 @@ wss.on("connection", (ws: WebSocket, req) => {
                 return;
               }
               active = null;
-              record.messages.push({ role: "assistant", text: finalText, tools, thinking, at: new Date().toISOString() });
-              store.save(record);
-              send({ type: "done", text: finalText });
-              if (!anyoneWatching()) barkPush("麦穗", finalText).catch(() => {});
-              // 后台异步提取记忆碎片；不 await、出错不影响主聊天
-              scheduleExtractionIfNeeded(record);
+              const { clean, apiError } = splitApiError(finalText);
+              if (apiError) {
+                console.error(`[channel] CLI 把 API 报错当正文吐了：${apiError.slice(0, 160)}`);
+                send({ type: "error", message: apiErrorNote(apiError) });
+              }
+              if (clean) {
+                record.messages.push({ role: "assistant", text: clean, tools, thinking, at: new Date().toISOString() });
+                store.save(record);
+                // 后台异步提取记忆碎片；不 await、出错不影响主聊天
+                scheduleExtractionIfNeeded(record);
+              }
+              send({ type: "done", text: clean });
+              if (!anyoneWatching()) barkPush(apiError ? "麦穗（出错）" : "麦穗", clean || apiError || "这轮没说出话").catch(() => {});
               maybeAutoCompact(record, usage, send);
             },
             onError(message) {
