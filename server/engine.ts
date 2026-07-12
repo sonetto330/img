@@ -127,6 +127,20 @@ export function runTurn(opts: TurnOptions, cb: TurnCallbacks): TurnHandle {
   let thinkingMs = 0;
   let thinkingStartedAt = 0; // 0 = 当前没有进行中的思考段
 
+  // 延迟埋点：她等的时间花在哪段——CLI 冷启动（spawn→init）还是 API 首内容
+  // （init→第一个流事件，缓存 miss 时整段历史全价重读就卡在这里）
+  const t0 = Date.now();
+  let tInit = 0;
+  let firstContentLogged = false;
+  const logFirstContent = () => {
+    if (firstContentLogged) return;
+    firstContentLogged = true;
+    const now = Date.now();
+    console.log(
+      `[latency] CLI 启动 ${((tInit || now) - t0) / 1000}s · 首内容 ${tInit ? (now - tInit) / 1000 : "?"}s（init→第一个字/思考/工具；缓存 miss 的轮这段会陡增）`
+    );
+  };
+
   const closeThinkingSpan = () => {
     if (thinkingStartedAt) {
       thinkingMs += Date.now() - thinkingStartedAt;
@@ -140,14 +154,19 @@ export function runTurn(opts: TurnOptions, cb: TurnCallbacks): TurnHandle {
       for await (const msg of q) {
         switch (msg.type) {
           case "system":
-            if (msg.subtype === "init") cb.onClaudeSession(msg.session_id);
+            if (msg.subtype === "init") {
+              tInit = Date.now();
+              cb.onClaudeSession(msg.session_id);
+            }
             break;
           case "stream_event": {
             const e = msg.event;
             if (e.type === "content_block_delta" && e.delta.type === "text_delta") {
+              logFirstContent();
               closeThinkingSpan();
               cb.onDelta(e.delta.text);
             } else if (e.type === "content_block_delta" && e.delta.type === "thinking_delta") {
+              logFirstContent();
               if (!thinkingStartedAt) thinkingStartedAt = Date.now();
               thinkingParts.push(e.delta.thinking);
               cb.onThinkingDelta?.(e.delta.thinking);
@@ -157,6 +176,7 @@ export function runTurn(opts: TurnOptions, cb: TurnCallbacks): TurnHandle {
             break;
           }
           case "assistant":
+            logFirstContent();
             for (const block of msg.message.content) {
               if (block.type === "text" && block.text.trim()) {
                 textParts.push(block.text);
@@ -181,7 +201,7 @@ export function runTurn(opts: TurnOptions, cb: TurnCallbacks): TurnHandle {
               // 判断窗口大小。
               console.log(
                 `[usage] 本轮 ${msg.num_turns} 步累计输入 ${totalIn}（缓存命中 ${u.cache_read_input_tokens}=${hitPct}% · 写入 ${u.cache_creation_input_tokens} · 全价 ${u.input_tokens}）` +
-                  `｜输出 ${u.output_tokens}｜折官方价 $${msg.total_cost_usd.toFixed(4)}`
+                  `｜输出 ${u.output_tokens}｜折官方价 $${msg.total_cost_usd.toFixed(4)}｜全程 ${((Date.now() - t0) / 1000).toFixed(1)}s`
               );
               cb.onUsage?.({
                 steps: msg.num_turns,
