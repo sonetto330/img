@@ -177,7 +177,7 @@ function clearGptIndicator() {
       gptHeadEl = null;
       return;
     }
-    liveBubble.remove();
+    liveBubble.closest(".msg-group")?.remove();
     liveBubble = null;
   }
   gptHeadEl?.remove();
@@ -462,16 +462,7 @@ function addChanNote(text) {
 }
 
 const bubbleRawText = new WeakMap();
-const bubbleCopyButton = new WeakMap();
 const copyResetTimers = new WeakMap();
-let mobileCopyBubble = null;
-
-function hideMobileCopyButton(except) {
-  if (mobileCopyBubble && mobileCopyBubble !== except) {
-    mobileCopyBubble.classList.remove("copy-visible");
-    mobileCopyBubble = null;
-  }
-}
 
 // https 外优先走现代剪贴板；http 入口用老办法兜底
 async function writeClipboard(text) {
@@ -504,8 +495,7 @@ function resetCopyButton(button) {
   button.setAttribute("aria-label", "复制消息");
 }
 
-function addCopyButton(bubble) {
-  bubble.classList.add("copyable");
+function addCopyButton(bubble, actions) {
   const button = document.createElement("button");
   button.type = "button";
   button.className = "copy-btn";
@@ -523,55 +513,14 @@ function addCopyButton(bubble) {
     button.setAttribute("aria-label", button.title);
     copyResetTimers.set(button, setTimeout(() => resetCopyButton(button), 1000));
   };
-  bubbleCopyButton.set(bubble, button);
-  bubble.prepend(button);
-
-  let pressTimer = null;
-  let startX = 0;
-  let startY = 0;
-  const cancelPress = () => {
-    if (pressTimer) clearTimeout(pressTimer);
-    pressTimer = null;
-  };
-  bubble.addEventListener("touchstart", (event) => {
-    if (event.target.closest(".copy-btn") || event.touches.length !== 1) return;
-    hideMobileCopyButton(bubble);
-    const touch = event.touches[0];
-    startX = touch.clientX;
-    startY = touch.clientY;
-    cancelPress();
-    pressTimer = setTimeout(() => {
-      bubble.classList.add("copy-visible");
-      mobileCopyBubble = bubble;
-      pressTimer = null;
-    }, 500);
-  }, { passive: true });
-  bubble.addEventListener("touchmove", (event) => {
-    if (!pressTimer || event.touches.length !== 1) return cancelPress();
-    const touch = event.touches[0];
-    if (Math.hypot(touch.clientX - startX, touch.clientY - startY) > 10) cancelPress();
-  }, { passive: true });
-  bubble.addEventListener("touchend", cancelPress, { passive: true });
-  bubble.addEventListener("touchcancel", cancelPress, { passive: true });
+  actions.appendChild(button);
 }
 
 function setBubbleText(bubble, text) {
   const raw = text ?? "";
   bubbleRawText.set(bubble, raw);
-  const button = bubbleCopyButton.get(bubble);
   bubble.textContent = raw;
-  if (button) bubble.prepend(button);
 }
-
-document.addEventListener("touchstart", (event) => {
-  const bubble = event.target.closest(".msg");
-  if (bubble !== mobileCopyBubble) hideMobileCopyButton();
-}, { passive: true });
-document.addEventListener("click", (event) => {
-  if (!event.target.closest(".copy-btn") && event.target.closest(".msg") !== mobileCopyBubble) {
-    hideMobileCopyButton();
-  }
-});
 
 function addBubble(kind, text) {
   const div = document.createElement("div");
@@ -579,12 +528,19 @@ function addBubble(kind, text) {
     kind === "me" ? "msg me" :
     kind === "error" ? "msg error" :
     kind === "gpt" ? "msg ta gpt" : "msg ta";
-  if (kind === "error") div.textContent = text;
-  else {
+  if (kind === "error") {
+    div.textContent = text;
+    messagesEl.appendChild(div);
+  } else {
+    const group = document.createElement("div");
+    group.className = `msg-group ${kind === "me" ? "me" : "ta"}`;
+    const actions = document.createElement("div");
+    actions.className = "msg-actions";
     setBubbleText(div, text);
-    addCopyButton(div);
+    addCopyButton(div, actions);
+    group.append(div, actions);
+    messagesEl.appendChild(group);
   }
-  messagesEl.appendChild(div);
   scrollDown();
   return div;
 }
@@ -611,14 +567,12 @@ function forceScrollDown() {
 function renderMd(el, text) {
   const raw = text ?? "";
   bubbleRawText.set(el, raw);
-  const button = bubbleCopyButton.get(el);
   try {
     el.innerHTML = marked.parse(raw);
     el.classList.add("md");
   } catch {
     el.textContent = raw;
   }
-  if (button) el.prepend(button);
   scrollDown();
 }
 
