@@ -112,6 +112,7 @@ header button#backHome { font-size: 18px; }
 }
 
 .msg {
+  position: relative;
   max-width: 84%; padding: 10px 14px; border-radius: 16px;
   white-space: pre-wrap; word-break: break-word; line-height: 1.6; font-size: 15px;
 }
@@ -148,6 +149,35 @@ header button#backHome { font-size: 18px; }
   align-self: center; background: none; color: var(--muted);
   font-size: 11px; padding: 2px 12px; letter-spacing: .4px; font-family: var(--kai);
   user-select: none; -webkit-user-select: none;
+}
+
+/* 气泡角上的复制键：电脑悬停出现，手机由长按加 copy-visible */
+.copy-btn {
+  position: absolute; z-index: 2; top: 4px; right: 4px;
+  width: 28px; height: 28px; padding: 5px;
+  display: inline-flex; align-items: center; justify-content: center;
+  border: 1px solid rgba(210, 192, 165, .65); border-radius: 9px;
+  background: rgba(255, 253, 249, .94); color: var(--muted);
+  box-shadow: 0 2px 8px rgba(60, 40, 20, .08);
+  cursor: pointer; touch-action: manipulation;
+  opacity: 0; visibility: hidden; transform: translateY(-2px);
+  transition: opacity .15s ease, transform .15s ease, color .15s ease;
+}
+.copy-btn svg { width: 16px; height: 16px; pointer-events: none; }
+.copy-btn:hover { color: var(--accent); border-color: var(--accent-soft); }
+.copy-btn:focus-visible, .msg.copy-visible > .copy-btn {
+  opacity: 1; visibility: visible; transform: none;
+}
+.copy-btn.copied { color: var(--online); }
+.copy-btn.copy-failed { color: #b64525; }
+@media (hover: hover) and (pointer: fine) {
+  .msg:hover > .copy-btn { opacity: 1; visibility: visible; transform: none; }
+}
+@media (hover: none), (pointer: coarse) {
+  .msg.copyable {
+    user-select: none; -webkit-user-select: none;
+    -webkit-touch-callout: none;
+  }
 }
 
 /* Markdown 渲染后的气泡 */

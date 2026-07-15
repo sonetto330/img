@@ -68,7 +68,7 @@ function handle(msg) {
       if (msg.speaker === "gpt") {
         // 麦穗侧的 live 态还开着就先收口（正常时序他的 done 已经到了，这里是兜底）
         if (liveBubble && liveSpeaker !== "gpt") {
-          renderMd(liveBubble, liveBubble.textContent);
+          renderMd(liveBubble, bubbleRawText.get(liveBubble) || "");
           liveBubble = null;
           liveTools = null;
           liveThinking = null;
@@ -84,7 +84,7 @@ function handle(msg) {
         ensureTaHead();
         liveBubble = addBubble("ta", "");
       }
-      liveBubble.textContent += msg.text;
+      setBubbleText(liveBubble, (bubbleRawText.get(liveBubble) || "") + msg.text);
       scrollDown();
       break;
     case "tool": {
@@ -118,7 +118,7 @@ function handle(msg) {
         break;
       }
       let bubble = liveBubble;
-      if (bubble) renderMd(bubble, msg.text || bubble.textContent);
+      if (bubble) renderMd(bubble, msg.text || bubbleRawText.get(bubble) || "");
       else if (msg.text) {
         maybeStamp();
         if (msg.speaker === "gpt") {
@@ -129,9 +129,6 @@ function handle(msg) {
           bubble = addBubble("ta", "");
         }
         renderMd(bubble, msg.text);
-      }
-      if (bubble && msg.text) {
-        bubble.dataset.raw = msg.text;
       }
       finishTurn();
       loadSessions();
@@ -174,8 +171,9 @@ function handle(msg) {
 // 已经吐过内容的气泡不动：打断发生在半截时，说出来的话留着
 function clearGptIndicator() {
   if (liveSpeaker === "gpt" && liveBubble) {
-    if (liveBubble.textContent) {
-      renderMd(liveBubble, liveBubble.textContent);
+    const raw = bubbleRawText.get(liveBubble) || "";
+    if (raw) {
+      renderMd(liveBubble, raw);
       gptHeadEl = null;
       return;
     }
@@ -296,6 +294,9 @@ const ICONS = {
   bash: SVG('<polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/>'),
   agent: SVG('<rect x="4" y="8" width="16" height="12" rx="2"/><line x1="12" y1="4" x2="12" y2="8"/><line x1="9" y1="13" x2="9" y2="15"/><line x1="15" y1="13" x2="15" y2="15"/>'),
   todo: SVG('<line x1="9" y1="6" x2="20" y2="6"/><line x1="9" y1="12" x2="20" y2="12"/><line x1="9" y1="18" x2="20" y2="18"/><polyline points="4 5.5 5 6.5 6.5 4.5"/><polyline points="4 11.5 5 12.5 6.5 10.5"/><polyline points="4 17.5 5 18.5 6.5 16.5"/>'),
+  copy: SVG('<rect x="8" y="8" width="11" height="11" rx="2"/><path d="M16 8V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h3"/>'),
+  copied: SVG('<polyline points="4 12 9 17 20 6"/>'),
+  copyFail: SVG('<line x1="6" y1="6" x2="18" y2="18"/><line x1="18" y1="6" x2="6" y2="18"/>'),
 };
 const TOOL_ICON_KEYS = [
   ["read", "read"], ["glob", "glob"], ["grep", "grep"], ["search", "web"], ["fetch", "web"],
@@ -460,13 +461,129 @@ function addChanNote(text) {
   return note;
 }
 
+const bubbleRawText = new WeakMap();
+const bubbleCopyButton = new WeakMap();
+const copyResetTimers = new WeakMap();
+let mobileCopyBubble = null;
+
+function hideMobileCopyButton(except) {
+  if (mobileCopyBubble && mobileCopyBubble !== except) {
+    mobileCopyBubble.classList.remove("copy-visible");
+    mobileCopyBubble = null;
+  }
+}
+
+// https 外优先走现代剪贴板；http 入口用老办法兜底
+async function writeClipboard(text) {
+  if (navigator.clipboard?.writeText) {
+    try {
+      await navigator.clipboard.writeText(text);
+      return true;
+    } catch {}
+  }
+  const textarea = document.createElement("textarea");
+  textarea.value = text;
+  textarea.readOnly = true;
+  textarea.style.cssText = "position:fixed;left:-9999px;top:0;opacity:0;font-size:16px";
+  document.body.appendChild(textarea);
+  textarea.focus();
+  textarea.select();
+  textarea.setSelectionRange(0, textarea.value.length);
+  let copied = false;
+  try {
+    copied = document.execCommand("copy");
+  } catch {}
+  textarea.remove();
+  return copied;
+}
+
+function resetCopyButton(button) {
+  button.classList.remove("copied", "copy-failed");
+  button.innerHTML = ICONS.copy;
+  button.title = "复制";
+  button.setAttribute("aria-label", "复制消息");
+}
+
+function addCopyButton(bubble) {
+  bubble.classList.add("copyable");
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "copy-btn";
+  resetCopyButton(button);
+  button.onclick = async (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    const oldTimer = copyResetTimers.get(button);
+    if (oldTimer) clearTimeout(oldTimer);
+    const copied = await writeClipboard(bubbleRawText.get(bubble) || "");
+    button.classList.toggle("copied", copied);
+    button.classList.toggle("copy-failed", !copied);
+    button.innerHTML = copied ? ICONS.copied : ICONS.copyFail;
+    button.title = copied ? "已复制" : "复制失败";
+    button.setAttribute("aria-label", button.title);
+    copyResetTimers.set(button, setTimeout(() => resetCopyButton(button), 1000));
+  };
+  bubbleCopyButton.set(bubble, button);
+  bubble.prepend(button);
+
+  let pressTimer = null;
+  let startX = 0;
+  let startY = 0;
+  const cancelPress = () => {
+    if (pressTimer) clearTimeout(pressTimer);
+    pressTimer = null;
+  };
+  bubble.addEventListener("touchstart", (event) => {
+    if (event.target.closest(".copy-btn") || event.touches.length !== 1) return;
+    hideMobileCopyButton(bubble);
+    const touch = event.touches[0];
+    startX = touch.clientX;
+    startY = touch.clientY;
+    cancelPress();
+    pressTimer = setTimeout(() => {
+      bubble.classList.add("copy-visible");
+      mobileCopyBubble = bubble;
+      pressTimer = null;
+    }, 500);
+  }, { passive: true });
+  bubble.addEventListener("touchmove", (event) => {
+    if (!pressTimer || event.touches.length !== 1) return cancelPress();
+    const touch = event.touches[0];
+    if (Math.hypot(touch.clientX - startX, touch.clientY - startY) > 10) cancelPress();
+  }, { passive: true });
+  bubble.addEventListener("touchend", cancelPress, { passive: true });
+  bubble.addEventListener("touchcancel", cancelPress, { passive: true });
+}
+
+function setBubbleText(bubble, text) {
+  const raw = text ?? "";
+  bubbleRawText.set(bubble, raw);
+  const button = bubbleCopyButton.get(bubble);
+  bubble.textContent = raw;
+  if (button) bubble.prepend(button);
+}
+
+document.addEventListener("touchstart", (event) => {
+  const bubble = event.target.closest(".msg");
+  if (bubble !== mobileCopyBubble) hideMobileCopyButton();
+}, { passive: true });
+document.addEventListener("click", (event) => {
+  if (!event.target.closest(".copy-btn") && event.target.closest(".msg") !== mobileCopyBubble) {
+    hideMobileCopyButton();
+  }
+});
+
 function addBubble(kind, text) {
   const div = document.createElement("div");
   div.className =
     kind === "me" ? "msg me" :
     kind === "error" ? "msg error" :
     kind === "gpt" ? "msg ta gpt" : "msg ta";
-  div.textContent = text;
+  if (kind === "error") div.textContent = text;
+  else {
+    setBubbleText(div, text);
+    addCopyButton(div);
+  }
   messagesEl.appendChild(div);
   scrollDown();
   return div;
@@ -492,12 +609,16 @@ function forceScrollDown() {
 
 // 把回复渲染成排版好的样子（加粗、列表、代码块）
 function renderMd(el, text) {
+  const raw = text ?? "";
+  bubbleRawText.set(el, raw);
+  const button = bubbleCopyButton.get(el);
   try {
-    el.innerHTML = marked.parse(text);
+    el.innerHTML = marked.parse(raw);
     el.classList.add("md");
   } catch {
-    el.textContent = text;
+    el.textContent = raw;
   }
+  if (button) el.prepend(button);
   scrollDown();
 }
 
@@ -1037,7 +1158,6 @@ function renderMessage(m) {
     } else {
       const bubble = addBubble(isGpt ? "gpt" : "ta", "");
       renderMd(bubble, m.text);
-      bubble.dataset.raw = m.text;
     }
   }
 }
