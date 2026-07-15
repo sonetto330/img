@@ -507,6 +507,12 @@ function sendMessage() {
   if ((!text && ready.length === 0) || busy || !ws || ws.readyState !== 1) return;
   if (pending.some((p) => p.uploading)) return addBubble("error", "附件还在上传，稍等一下");
   const attachments = ready.map(({ _thumb, ...att }) => att);
+  const sentDraftKey = draftStorageKey();
+  const payload = { type: "chat", sessionId, text, attachments, model: modelSelect.value || undefined };
+  // 待建群聊的首条消息带 mode:"group"；后端只在新建会话时认，发完就清
+  if (pendingMode) payload.mode = pendingMode;
+  ws.send(JSON.stringify(payload));
+  pendingMode = null;
   maybeStamp();
   const bubble = addBubble("me", text);
   // attachToBubble 的 before 是插最前面，倒着喂才能保持选择顺序
@@ -514,19 +520,13 @@ function sendMessage() {
   clearPending();
   inputEl.value = "";
   autoGrow();
+  localStorage.removeItem(sentDraftKey);
   busy = true;
   dotEl.classList.add("busy");
   statusTextEl.textContent = "正在干活…";
   sendBtn.hidden = true;
   stopBtn.hidden = false;
   showTyping();
-  const payload = { type: "chat", sessionId, text, attachments, model: modelSelect.value || undefined };
-  // 待建群聊的首条消息带 mode:"group"；后端只在新建会话时认，发完就清
-  if (pendingMode) {
-    payload.mode = pendingMode;
-    pendingMode = null;
-  }
-  ws.send(JSON.stringify(payload));
   // 你刚发了消息，肯定想看到，无条件贴底
   forceScrollDown();
 }
@@ -751,7 +751,25 @@ function autoGrow() {
   inputEl.style.height = "auto";
   inputEl.style.height = Math.min(inputEl.scrollHeight, 140) + "px";
 }
+
+function draftStorageKey() {
+  if (sessionId) return `home_draft_${sessionId}`;
+  return pendingMode === "group" ? "home_draft_new_group" : "home_draft_new";
+}
+
+function saveDraft() {
+  const key = draftStorageKey();
+  if (inputEl.value) localStorage.setItem(key, inputEl.value);
+  else localStorage.removeItem(key);
+}
+
+function restoreDraft() {
+  inputEl.value = localStorage.getItem(draftStorageKey()) || "";
+  autoGrow();
+}
+
 inputEl.addEventListener("input", autoGrow);
+inputEl.addEventListener("input", saveDraft);
 
 // —— 会话列表 ——
 async function api(pathname) {
@@ -1076,6 +1094,7 @@ async function openSession(id) {
   pendingOlderMessages = null;
   lastStampTime = 0;
   pendingMode = null; // 点开旧会话就不算待建群聊了
+  restoreDraft();
 
   const all = record.messages;
   if (all.length > CHAT_CHUNK) {
@@ -1099,6 +1118,7 @@ $("newChat").onclick = () => {
   lastStampTime = 0;
   // 在议事厅里点＋就是开新群聊，单聊区照旧
   pendingMode = chatArea === "group" ? "group" : null;
+  restoreDraft();
   if (chatArea === "group") addChanNote("新议事：泽 + 麦穗 + GPT，发第一条消息就开张");
   closeDrawer();
 };
@@ -1114,6 +1134,7 @@ async function enterChatArea(area) {
   if (chatArea === area) {
     // 已经在这个区就直接进去，不打断正开着的会话
     showView("chat");
+    restoreDraft();
     return;
   }
   chatArea = area;
@@ -1134,6 +1155,7 @@ async function enterChatArea(area) {
       return;
     }
   } catch {}
+  restoreDraft();
   if (area === "group") addChanNote("议事厅：泽 + 麦穗 + GPT，发第一条消息就开张");
 }
 
@@ -1624,4 +1646,12 @@ setInterval(updateWeather, 10 * 60_000);
 
 connect();
 loadSessions();
-if (sessionId) openSession(sessionId).catch(() => { sessionId = null; });
+if (sessionId) {
+  openSession(sessionId).catch(() => {
+    sessionId = null;
+    localStorage.removeItem("home_session");
+    restoreDraft();
+  });
+} else {
+  restoreDraft();
+}
