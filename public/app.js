@@ -23,6 +23,10 @@ let busy = false;
 let liveBubble = null; // 正在流式输出的气泡
 let liveTools = null;
 let liveThinking = null; // 正在流式输出的思考卡片
+let pendingMode = null; // "议事厅"入口进来时是 "group"，随首条消息发出；后端只在新建会话时认
+let chatArea = "solo"; // 当前聊天区："solo"=跟麦穗单聊（心形进），"group"=议事厅（工具页进）；抽屉列表按区过滤
+let liveSpeaker = null; // 当前 live 气泡属于谁："gpt" 或 null（麦穗）
+let gptHeadEl = null; // GPT 的名字头：gpt_start 先放上，delta 复用，沉默时收掉
 
 // —— WebSocket ——
 function connect() {
@@ -61,7 +65,21 @@ function handle(msg) {
       break;
     case "delta":
       hideTyping();
-      if (!liveBubble) {
+      if (msg.speaker === "gpt") {
+        // 麦穗侧的 live 态还开着就先收口（正常时序他的 done 已经到了，这里是兜底）
+        if (liveBubble && liveSpeaker !== "gpt") {
+          renderMd(liveBubble, liveBubble.textContent);
+          liveBubble = null;
+          liveTools = null;
+          liveThinking = null;
+        }
+        if (!liveBubble) {
+          maybeStamp();
+          if (!gptHeadEl) gptHeadEl = addTaHead(undefined, "GPT");
+          liveBubble = addBubble("gpt", "");
+          liveSpeaker = "gpt";
+        }
+      } else if (!liveBubble) {
         maybeStamp();
         ensureTaHead();
         liveBubble = addBubble("ta", "");
@@ -78,13 +96,38 @@ function handle(msg) {
       liveTools.add(msg);
       break;
     }
+    case "gpt_start": {
+      // 麦穗说完了，GPT 轮开跑（子进程要几秒到几十秒）：挂上名字头等着，打断键保持可用
+      hideTyping();
+      busy = true;
+      dotEl.classList.add("busy");
+      statusTextEl.textContent = "GPT 正在输入…";
+      sendBtn.hidden = true;
+      stopBtn.hidden = false;
+      maybeStamp();
+      if (!gptHeadEl) gptHeadEl = addTaHead(undefined, "GPT");
+      showTyping();
+      break;
+    }
     case "done": {
+      if (msg.speaker === "gpt" && !msg.text) {
+        // GPT 沉默或被打断：把名字头和空气泡收掉，别留空壳
+        clearGptIndicator();
+        finishTurn();
+        loadSessions();
+        break;
+      }
       let bubble = liveBubble;
       if (bubble) renderMd(bubble, msg.text || bubble.textContent);
       else if (msg.text) {
         maybeStamp();
-        ensureTaHead();
-        bubble = addBubble("ta", "");
+        if (msg.speaker === "gpt") {
+          if (!gptHeadEl) gptHeadEl = addTaHead(undefined, "GPT");
+          bubble = addBubble("gpt", "");
+        } else {
+          ensureTaHead();
+          bubble = addBubble("ta", "");
+        }
         renderMd(bubble, msg.text);
       }
       if (bubble && msg.text) {
@@ -119,10 +162,28 @@ function handle(msg) {
         location.reload();
         return;
       }
+      // GPT 侧失败时麦穗的回复已经正常收完，只用收掉 GPT 的等待指示，别动他的气泡
+      if (msg.speaker === "gpt") clearGptIndicator();
       addBubble("error", msg.message);
       finishTurn();
       break;
   }
+}
+
+// 把 GPT 的等待指示（名字头 + 还空着的 live 气泡）从页面上撤掉
+// 已经吐过内容的气泡不动：打断发生在半截时，说出来的话留着
+function clearGptIndicator() {
+  if (liveSpeaker === "gpt" && liveBubble) {
+    if (liveBubble.textContent) {
+      renderMd(liveBubble, liveBubble.textContent);
+      gptHeadEl = null;
+      return;
+    }
+    liveBubble.remove();
+    liveBubble = null;
+  }
+  gptHeadEl?.remove();
+  gptHeadEl = null;
 }
 
 function finishTurn() {
@@ -131,6 +192,8 @@ function finishTurn() {
   liveTools = null;
   liveThinking = null;
   liveHead = false;
+  liveSpeaker = null;
+  gptHeadEl = null;
   hideTyping();
   dotEl.classList.remove("busy");
   statusTextEl.textContent = "在线";
@@ -368,15 +431,17 @@ function fmtTime(t) {
   return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
 }
 let liveHead = false; // 这一轮回复的头行是否已经放了
-function addTaHead(at) {
+function addTaHead(at, name = "麦穗") {
   const div = document.createElement("div");
   div.className = "ta-head";
-  const name = document.createElement("span");
-  name.textContent = "麦穗";
+  if (name === "GPT") div.classList.add("gpt");
+  const nameEl = document.createElement("span");
+  nameEl.textContent = name;
   const tm = document.createElement("time");
   tm.textContent = fmtTime(at);
-  div.append(name, tm);
+  div.append(nameEl, tm);
   messagesEl.appendChild(div);
+  return div;
 }
 function ensureTaHead() {
   if (liveHead) return;
@@ -397,7 +462,10 @@ function addChanNote(text) {
 
 function addBubble(kind, text) {
   const div = document.createElement("div");
-  div.className = kind === "me" ? "msg me" : kind === "error" ? "msg error" : "msg ta";
+  div.className =
+    kind === "me" ? "msg me" :
+    kind === "error" ? "msg error" :
+    kind === "gpt" ? "msg ta gpt" : "msg ta";
   div.textContent = text;
   messagesEl.appendChild(div);
   scrollDown();
@@ -452,7 +520,13 @@ function sendMessage() {
   sendBtn.hidden = true;
   stopBtn.hidden = false;
   showTyping();
-  ws.send(JSON.stringify({ type: "chat", sessionId, text, attachments, model: modelSelect.value || undefined }));
+  const payload = { type: "chat", sessionId, text, attachments, model: modelSelect.value || undefined };
+  // 待建群聊的首条消息带 mode:"group"；后端只在新建会话时认，发完就清
+  if (pendingMode) {
+    payload.mode = pendingMode;
+    pendingMode = null;
+  }
+  ws.send(JSON.stringify(payload));
   // 你刚发了消息，肯定想看到，无条件贴底
   forceScrollDown();
 }
@@ -740,11 +814,13 @@ async function loadSessions() {
 }
 
 // 画会话列表：散装的按时间在上，文件夹收在底部（折叠状态记本机，点行头开合）
+// 只画当前区的会话：单聊区不见群聊，议事厅里不见单聊
 function renderSessions() {
   listEl.innerHTML = "";
-  const loose = sessionsCache.filter((s) => !s.folder);
+  const inArea = sessionsCache.filter((s) => (s.mode === "group") === (chatArea === "group"));
+  const loose = inArea.filter((s) => !s.folder);
   const folders = new Map();
-  for (const s of sessionsCache) {
+  for (const s of inArea) {
     if (!s.folder) continue;
     if (!folders.has(s.folder)) folders.set(s.folder, []);
     folders.get(s.folder).push(s);
@@ -922,8 +998,11 @@ async function doDelete(sess) {
 // 一条消息的渲染逻辑，openSession 和"查看更早"复用同一份
 function renderMessage(m) {
   if (m.at) maybeStamp(m.at);
+  const isGpt = m.role === "assistant" && m.speaker === "gpt";
   // 他的回合开头放一行名字+时间（拍一拍的回应除外，那个本来就是小字）
-  if (m.role === "assistant" && (m.text || m.thinking?.text || m.tools?.length)) addTaHead(m.at);
+  if (m.role === "assistant" && (m.text || m.thinking?.text || m.tools?.length)) {
+    addTaHead(m.at, isGpt ? "GPT" : "麦穗");
+  }
   if (m.thinking?.text) newThinkingCard(m.thinking);
   if (m.tools?.length) {
     const tb = newToolbox();
@@ -938,7 +1017,7 @@ function renderMessage(m) {
         for (const att of m.attachments || []) attachToBubble(bubble, att, true);
       }
     } else {
-      const bubble = addBubble("ta", "");
+      const bubble = addBubble(isGpt ? "gpt" : "ta", "");
       renderMd(bubble, m.text);
       bubble.dataset.raw = m.text;
     }
@@ -990,9 +1069,13 @@ async function openSession(id) {
   const record = await api(`/api/sessions/${id}`);
   sessionId = record.id;
   localStorage.setItem("home_session", sessionId);
+  // 打开哪个区的会话就落在哪个区（初始恢复上次会话时靠这行自动定区）
+  chatArea = record.mode === "group" ? "group" : "solo";
+  updateAreaLabels();
   messagesEl.innerHTML = "";
   pendingOlderMessages = null;
   lastStampTime = 0;
+  pendingMode = null; // 点开旧会话就不算待建群聊了
 
   const all = record.messages;
   if (all.length > CHAT_CHUNK) {
@@ -1014,8 +1097,47 @@ $("newChat").onclick = () => {
   messagesEl.innerHTML = "";
   pendingOlderMessages = null;
   lastStampTime = 0;
+  // 在议事厅里点＋就是开新群聊，单聊区照旧
+  pendingMode = chatArea === "group" ? "group" : null;
+  if (chatArea === "group") addChanNote("新议事：泽 + 麦穗 + GPT，发第一条消息就开张");
   closeDrawer();
 };
+
+// 议事厅（工具页入口）→ 群聊区；心形爱心 → 单聊区。两区列表互不掺和
+function updateAreaLabels() {
+  const group = chatArea === "group";
+  $("whoName").textContent = group ? "议事厅" : "麦穗";
+  $("drawerTitle").textContent = group ? "议事厅" : "会话";
+}
+
+async function enterChatArea(area) {
+  if (chatArea === area) {
+    // 已经在这个区就直接进去，不打断正开着的会话
+    showView("chat");
+    return;
+  }
+  chatArea = area;
+  updateAreaLabels();
+  sessionId = null;
+  localStorage.removeItem("home_session");
+  messagesEl.innerHTML = "";
+  pendingOlderMessages = null;
+  lastStampTime = 0;
+  pendingMode = area === "group" ? "group" : null;
+  showView("chat");
+  // 接着上次的聊：找这个区最近的会话打开；一个都没有就空白待建
+  try {
+    await loadSessions();
+    const latest = sessionsCache.find((s) => (s.mode === "group") === (area === "group"));
+    if (latest) {
+      await openSession(latest.id);
+      return;
+    }
+  } catch {}
+  if (area === "group") addChanNote("议事厅：泽 + 麦穗 + GPT，发第一条消息就开张");
+}
+
+$("toolGroup").onclick = () => enterChatArea("group");
 
 // —— 抽屉 ——
 function closeDrawer() {
@@ -1061,7 +1183,9 @@ function showView(name) {
 for (const btn of bottomNavEl.querySelectorAll(".nav-btn")) {
   btn.onclick = () => {
     if (btn.disabled) return;
-    showView(btn.dataset.view);
+    // 心形永远进单聊区；正开着议事厅时点它就切回跟麦穗单聊
+    if (btn.dataset.view === "chat") enterChatArea("solo");
+    else showView(btn.dataset.view);
   };
 }
 
@@ -1070,7 +1194,7 @@ for (const card of document.querySelectorAll("#homeView .card")) {
   card.onclick = () => {
     if (card.disabled) return;
     const route = card.dataset.route;
-    if (route === "chat") showView("chat");
+    if (route === "chat") enterChatArea("solo");
     else if (route === "memory") showView("memory");
   };
 }

@@ -26,6 +26,7 @@
   --line: #ece1d0;
   --online: #58b368;
   --name: #8d6748; /* 聊天里"麦穗"名字的暖棕 */
+  --gpt: #5b7687; /* 群聊里 GPT 的青灰，比暖棕冷一档，同在纸面上不打架 */
   /* 首页数字钟等用的衬线 */
   --serif: "Songti SC", "STSong", "SimSun", Georgia, "Times New Roman", serif;
   /* 聊天正文：京华老宋体打头，没加载好之前楷体顶 */
@@ -135,6 +136,12 @@ header button#backHome { font-size: 18px; }
 }
 .ta-head span { font-size: 20px; font-weight: 500; color: var(--name); letter-spacing: 1.5px; font-family: var(--kai); }
 .ta-head time { font-size: 11.5px; color: var(--muted); letter-spacing: .8px; font-family: var(--kai); }
+/* 群聊里 GPT 的名字头和话：名字换青灰，正文加一道淡竖线，跟麦穗的裸排一眼分开 */
+.ta-head.gpt span { color: var(--gpt); }
+.msg.ta.gpt {
+  border-left: 2px solid rgba(91, 118, 135, .3);
+  padding-left: 12px;
+}
 .msg.error { align-self: center; background: #fbe9e4; color: #a33f22; font-size: 13px; border-radius: 10px; }
 .msg.pat { align-self: center; background: none; color: var(--muted); font-size: 12px; padding: 4px 12px; }
 .msg.stamp {
@@ -362,6 +369,7 @@ footer textarea::placeholder { color: var(--muted); opacity: .75; }
   display: flex; justify-content: space-between; align-items: center;
   padding: 14px; border-bottom: 1px solid var(--line); font-weight: 600;
 }
+.drawer-head-btns { display: flex; gap: 6px; }
 .drawer-head button {
   border: 1px solid var(--line); background: var(--bg); border-radius: 8px;
   padding: 4px 10px; cursor: pointer; font-size: 13px; color: var(--ink);
@@ -773,6 +781,8 @@ footer textarea::placeholder { color: var(--muted); opacity: .75; }
 .tool-card b { font-size: 16px; font-weight: 600; letter-spacing: 2px; }
 .tool-card small { font-size: 11.5px; color: var(--muted); letter-spacing: 1px; }
 .tool-card-icon { color: var(--name); }
+/* 议事厅图标换青灰，跟群聊里 GPT 的配色呼应 */
+#toolGroup .tool-card-icon { color: var(--gpt); }
 .tool-card-icon svg { width: 26px; height: 26px; }
 .tool-card-soon { opacity: .45; cursor: default; }
 
