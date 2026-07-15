@@ -33,29 +33,33 @@ export interface ModeDef {
 
 /**
  * 已注册的模式。新增模式在这里加一条即可，别忘了同步前端页签。
- * 跑团（trpg）、旅行（travel）等在后续期数补上，本期只有 chat。
+ * 跑团（trpg）、旅行（travel）等在后续期数补上。
  */
+const chromeTools: ModeDef["buildTools"] = () => ({
+  mcpServers: {
+    chrome: {
+      type: "stdio",
+      command: process.execPath,
+      args: [
+        path.join(root, "node_modules", "chrome-devtools-mcp", "build", "src", "bin", "chrome-devtools-mcp.js"),
+        "--autoConnect",
+      ],
+    },
+  },
+});
+
 const MODES: Record<string, ModeDef> = {
   chat: {
     id: "chat",
     label: "聊天",
     // Chrome 浏览器工具：直连泽日常的 Chrome（144+ 需在 chrome://inspect/#remote-debugging
     // 开过"远程调试"开关；没开或 Chrome 没运行时该组工具连不上，聊天本身不受影响）
-    buildTools: () => ({
-      mcpServers: {
-        chrome: {
-          type: "stdio",
-          command: process.execPath,
-          args: [
-            path.join(root, "node_modules", "chrome-devtools-mcp", "build", "src", "bin", "chrome-devtools-mcp.js"),
-            "--autoConnect",
-          ],
-        },
-      },
-    }),
+    buildTools: chromeTools,
   },
   // 语音通话：不走 WS 聊天流，由 /api/call/turn 单独驱动，提示词管住"说话"的分寸
   call: { id: "call", label: "通话", promptFile: "call.md" },
+  // 三人群聊：泽 + 麦穗 + GPT（Codex CLI 子进程），编排在 index.ts 的 chat 流程里
+  group: { id: "group", label: "群聊", promptFile: "group.md", buildTools: chromeTools },
 };
 
 /** 未知的模式一律回落到 chat，避免拼错字段让麦穗不知道自己在哪 */

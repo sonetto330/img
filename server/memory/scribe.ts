@@ -58,7 +58,7 @@ async function extractFor(record: SessionRecord, targetIndex: number): Promise<v
 
   const convo = newMessages
     .filter((m) => m.text?.trim() && m.text !== "（拍了拍你）")
-    .map((m) => `${m.role === "user" ? "泽" : "麦穗"}：${m.text}`)
+    .map((m) => `${m.role === "user" ? "泽" : m.speaker === "gpt" ? "GPT（群聊里的另一个AI）" : "麦穗"}：${m.text}`)
     .join("\n\n");
   if (!convo.trim()) {
     // 这段全是拍一拍/空消息，直接推进指针别下轮再重跑

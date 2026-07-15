@@ -19,7 +19,8 @@ function fmtTime(iso: string): string {
 }
 
 function who(m: StoredMessage): string {
-  return m.role === "user" ? "泽" : "麦穗";
+  if (m.role === "user") return "泽";
+  return m.speaker === "gpt" ? "GPT" : "麦穗";
 }
 
 /** 命中词附近截一段，两头加省略号 */

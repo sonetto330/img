@@ -12,6 +12,8 @@ export interface Attachment {
 
 export interface StoredMessage {
   role: "user" | "assistant";
+  /** 群聊里这条 assistant 消息是谁说的（如 "gpt"）；缺省 = 麦穗 */
+  speaker?: string;
   text: string;
   /** 早期记录是字符串数组，后来带 detail，两种都要能读 */
   tools?: Array<string | { name: string; detail?: string }>;
@@ -29,6 +31,10 @@ export interface SessionRecord {
   /** 所属文件夹名；空/缺省 = 不在任何文件夹。一层结构，不嵌套 */
   folder?: string;
   claudeSessionId?: string;
+  /** 群聊模式下 GPT 侧的 codex thread id，用于跨轮 resume */
+  codexThreadId?: string;
+  /** 群聊：messages 里前多少条已经喂给过 GPT（它自己的 thread 记得，不重喂） */
+  codexSeenCount?: number;
   createdAt: string;
   updatedAt: string;
   messages: StoredMessage[];

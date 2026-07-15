@@ -11,6 +11,7 @@ import { runTurn, PersistentSession, type TurnHandle, type TurnUsage } from "./e
 import { burnAttachments } from "./burn.js";
 import { splitApiError, apiErrorNote } from "./apierror.js";
 import { getMode, loadModePrompt, type ToolEvent } from "./modes.js";
+import { maybeRunGptTurn, unseenGptLines } from "./group.js";
 import { buildHistoryTools } from "./history.js";
 import { barkPush } from "./bark.js";
 import { synthesize, ttsEnabled } from "./tts.js";
@@ -826,7 +827,10 @@ wss.on("connection", (ws: WebSocket, req) => {
     const attLines = attachments
       .map((a) => `[泽发来${a.kind === "image" ? "一张图片" : "一个文件"}「${a.name}」，路径：${path.join(UPLOADS, a.file)}${a.kind === "image" ? "，用 Read 工具查看" : ""}]`)
       .join("\n");
-    const prompt = attLines ? `${attLines}\n\n${text || "（没写字，看内容吧）"}` : text;
+    const base = attLines ? `${attLines}\n\n${text || "（没写字，看内容吧）"}` : text;
+    // 群聊：上一轮 GPT 的发言前置进来，麦穗才看得到（GPT 的话不单独烧他一轮）
+    const gptLines = unseenGptLines(record);
+    const prompt = gptLines ? `${gptLines}\n\n${base}` : base;
 
     // 检索记忆：全模式生效。await 期间用一个占位 handle 锁住 active，防止连发消息触发并发
     const preparing: TurnHandle = { interrupt: async () => {} };
@@ -957,6 +961,19 @@ wss.on("connection", (ws: WebSocket, req) => {
               send({ type: "done", text: clean });
               if (!anyoneWatching()) barkPush(apiError ? "麦穗（出错）" : "麦穗", clean || apiError || "这轮没说出话").catch(() => {});
               maybeAutoCompact(record, usage, send);
+              // 群聊：麦穗说完轮到 GPT（看完整上下文后发言或沉默）；handle 挂到
+              // active 上保证可打断。非 group 模式里这是空操作
+              maybeRunGptTurn({
+                record,
+                store,
+                send,
+                notifyIfAway: (title, body) => {
+                  if (!anyoneWatching()) barkPush(title, body).catch(() => {});
+                },
+                setActive: (h) => {
+                  active = h;
+                },
+              });
             },
             onError(message) {
               if (!isRetry && !useApi && getSettings().channel === "auto" && externalConfigured() && !gotOutput) {
