@@ -19,6 +19,12 @@ const turnStatusBeatEl = $("turnStatusBeat");
 const drawerEl = $("drawer");
 const maskEl = $("mask");
 const listEl = $("sessionList");
+const chatEl = document.querySelector(".chat");
+const titleEl = $("whoName");
+const toBottomEl = $("toBottom");
+const toBottomBadgeEl = $("toBottomBadge");
+const imageViewerEl = $("imageViewer");
+const imageViewerImgEl = $("imageViewerImg");
 
 let ws = null;
 let sessionId = localStorage.getItem("home_session") || null;
@@ -35,6 +41,25 @@ let turnState = "idle";
 let turnToolName = null;
 let turnLastProgressAt = null;
 let turnStatusSpeaker = null;
+let pendingAssistantGroup = null;
+let renderingHistory = false;
+let unreadCount = 0;
+const pendingSends = [];
+
+function selectedModelLabel() {
+  const option = modelSelect.selectedOptions?.[0];
+  const label = option?.textContent?.trim() || "Opus";
+  return label === "默认" ? "Opus" : label.replace(/^✏️\s*/, "");
+}
+
+function setHeaderStatus(text) {
+  statusTextEl.dataset.state = text;
+  statusTextEl.textContent = chatArea === "group" ? text : `${text} · ${selectedModelLabel()}`;
+}
+
+function setChatTitle(title) {
+  titleEl.textContent = title || (chatArea === "group" ? "议事厅" : "麦穗");
+}
 
 function attachCurrentSession() {
   if (ws?.readyState === 1) ws.send(JSON.stringify({ type: "attach", sessionId }));
@@ -100,13 +125,13 @@ setInterval(renderTurnStatus, 1000);
 
 // —— WebSocket ——
 function connect() {
-  statusTextEl.textContent = "连接中…";
+  setHeaderStatus("连接中…");
   dotEl.classList.add("off");
   ws = new WebSocket(`${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/ws?token=${encodeURIComponent(token)}`);
   ws.onopen = () => {
     connectionLost = false;
     dotEl.classList.remove("off");
-    if (!busy) statusTextEl.textContent = "在线";
+    if (!busy) setHeaderStatus("在线");
     renderTurnStatus();
     attachCurrentSession();
   };
@@ -114,7 +139,8 @@ function connect() {
   ws.onclose = () => {
     connectionLost = true;
     dotEl.classList.add("off");
-    statusTextEl.textContent = "已断线，重连中…";
+    setHeaderStatus("已断线，重连中…");
+    failPendingSends();
     renderTurnStatus();
     setTimeout(connect, 1500);
   };
@@ -126,6 +152,12 @@ function handle(msg) {
     case "session":
       sessionId = msg.sessionId;
       localStorage.setItem("home_session", sessionId);
+      confirmPendingSend();
+      if (msg.mode) {
+        chatArea = msg.mode === "group" ? "group" : "solo";
+        updateAreaLabels();
+      }
+      setChatTitle(chatArea === "group" ? "议事厅" : msg.title);
       attachCurrentSession();
       break;
     case "turn_snapshot":
@@ -189,7 +221,7 @@ function handle(msg) {
       hideTyping();
       busy = true;
       dotEl.classList.add("busy");
-      statusTextEl.textContent = "GPT 正在输入…";
+      setHeaderStatus("GPT 正在输入…");
       sendBtn.hidden = true;
       stopBtn.hidden = false;
       maybeStamp();
@@ -219,6 +251,7 @@ function handle(msg) {
         renderMd(bubble, msg.text);
       }
       if (msg.interrupted && bubble) addHalfMark(bubble, msg.incompleteReason);
+      if (bubble && msg.usage) addUsage(bubble, msg.usage);
       finishTurn();
       loadSessions();
       break;
@@ -248,6 +281,7 @@ function handle(msg) {
         location.reload();
         return;
       }
+      if (pendingSends.length) failPendingSends();
       // GPT 侧失败时麦穗的回复已经正常收完，只用收掉 GPT 的等待指示，别动他的气泡
       if (msg.speaker === "gpt") clearGptIndicator();
       if (msg.interrupted && liveBubble) addHalfMark(liveBubble, msg.incompleteReason || "error");
@@ -327,9 +361,10 @@ function finishTurn() {
   liveHead = false;
   liveSpeaker = null;
   gptHeadEl = null;
+  pendingAssistantGroup = null;
   hideTyping();
   dotEl.classList.remove("busy");
-  statusTextEl.textContent = connectionLost ? "已断线，重连中…" : "在线";
+  setHeaderStatus(connectionLost ? "已断线，重连中…" : "在线");
   sendBtn.hidden = false;
   stopBtn.hidden = true;
   scrollDown();
@@ -357,7 +392,7 @@ function newThinkingCard(saved) {
     scrollDown();
   };
   box.append(head, body);
-  messagesEl.appendChild(box);
+  (pendingAssistantGroup || messagesEl).appendChild(box);
 
   // 翻译按钮：思考多为英文，点一下翻中文，再点切回原文
   let original = null; // 非 null 表示当前显示的是译文
@@ -422,7 +457,7 @@ function newThinkingCard(saved) {
 
 // —— 线条小图标（描边 SVG，颜色跟随文字，替掉五颜六色的 emoji） ——
 const SVG = (d) =>
-  `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">${d}</svg>`;
+  `<svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${d}</svg>`;
 const ICONS = {
   think: SVG('<path d="M9 18h6M10 21h4M12 3a6 6 0 0 0-3.6 10.8c.7.5 1.1 1.3 1.1 2.2h5c0-.9.4-1.7 1.1-2.2A6 6 0 0 0 12 3z"/>'),
   tools: SVG('<path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/>'),
@@ -430,15 +465,15 @@ const ICONS = {
   glob: SVG('<path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>'),
   grep: SVG('<circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.5" y2="16.5"/>'),
   web: SVG('<circle cx="12" cy="12" r="9"/><line x1="3" y1="12" x2="21" y2="12"/><path d="M12 3a15 15 0 0 1 0 18M12 3a15 15 0 0 0 0 18"/>'),
-  edit: SVG('<path d="M17 3a2.83 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5z"/>'),
+  edit: SVG('<path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/><path d="m15 5 4 4"/>'),
   bash: SVG('<polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/>'),
   agent: SVG('<rect x="4" y="8" width="16" height="12" rx="2"/><line x1="12" y1="4" x2="12" y2="8"/><line x1="9" y1="13" x2="9" y2="15"/><line x1="15" y1="13" x2="15" y2="15"/>'),
   todo: SVG('<line x1="9" y1="6" x2="20" y2="6"/><line x1="9" y1="12" x2="20" y2="12"/><line x1="9" y1="18" x2="20" y2="18"/><polyline points="4 5.5 5 6.5 6.5 4.5"/><polyline points="4 11.5 5 12.5 6.5 10.5"/><polyline points="4 17.5 5 18.5 6.5 16.5"/>'),
-  copy: SVG('<rect x="8" y="8" width="11" height="11" rx="2"/><path d="M16 8V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h3"/>'),
+  copy: SVG('<rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/>'),
   copied: SVG('<polyline points="4 12 9 17 20 6"/>'),
   copyFail: SVG('<line x1="6" y1="6" x2="18" y2="18"/><line x1="18" y1="6" x2="6" y2="18"/>'),
-  trash: SVG('<path d="M4 7h16M9 7V4h6v3M7 7l1 13h8l1-13M10 11v5M14 11v5"/>'),
-  rerun: SVG('<path d="M20 7v5h-5M4 17v-5h5"/><path d="M6.1 8.5A7 7 0 0 1 18.7 7L20 12M4 12l1.3 5A7 7 0 0 0 17.9 15.5"/>'),
+  trash: SVG('<path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/><line x1="10" x2="10" y1="11" y2="17"/><line x1="14" x2="14" y1="11" y2="17"/>').replace('class="ic"', 'class="ic ic-trash"'),
+  rerun: SVG('<path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/>'),
 };
 const TOOL_ICON_KEYS = [
   ["read", "read"], ["glob", "glob"], ["grep", "grep"], ["search", "web"], ["fetch", "web"],
@@ -479,7 +514,7 @@ function newToolbox() {
     scrollDown();
   };
   box.append(head, list);
-  messagesEl.appendChild(box);
+  (pendingAssistantGroup || messagesEl).appendChild(box);
   let n = 0;
   return {
     add(tool) {
@@ -531,7 +566,7 @@ function showTyping() {
   typingEl = document.createElement("div");
   typingEl.className = "typing";
   typingEl.innerHTML = "<span></span><span></span><span></span>";
-  messagesEl.appendChild(typingEl);
+  (pendingAssistantGroup || messagesEl).appendChild(typingEl);
   scrollDown();
 }
 function hideTyping() {
@@ -568,28 +603,32 @@ function maybeStamp(at) {
   lastStampTime = t;
 }
 
-// —— 他的话不带框，开头一行名字+时间（参考泽给的截图风格） ——
+// —— assistant 消息共用一套块骨架，单群只由 chat 上的模式类换皮 ——
 function fmtTime(t) {
   const d = t ? new Date(t) : new Date();
   return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
 }
 let liveHead = false; // 这一轮回复的头行是否已经放了
 function addTaHead(at, name = "麦穗") {
+  const group = document.createElement("div");
+  group.className = `msg-group msg-block ta ${name === "GPT" ? "gpt-block" : "maisui-block"}`;
   const div = document.createElement("div");
-  div.className = "ta-head";
-  if (name === "GPT") div.classList.add("gpt");
+  div.className = `speaker ${name === "GPT" ? "gpt" : "maisui"}`;
+  const dot = document.createElement("i");
   const nameEl = document.createElement("span");
   nameEl.textContent = name;
   const tm = document.createElement("time");
   tm.textContent = fmtTime(at);
-  div.append(nameEl, tm);
-  messagesEl.appendChild(div);
-  return div;
+  div.append(dot, nameEl, tm);
+  group.appendChild(div);
+  messagesEl.appendChild(group);
+  pendingAssistantGroup = group;
+  return group;
 }
 function ensureTaHead() {
-  if (liveHead) return;
+  if (liveHead) return pendingAssistantGroup;
   liveHead = true;
-  addTaHead();
+  return addTaHead();
 }
 
 // —— 界面 ——
@@ -661,7 +700,7 @@ function addCopyButton(bubble, actions) {
     button.innerHTML = copied ? ICONS.copied : ICONS.copyFail;
     button.title = copied ? "已复制" : "复制失败";
     button.setAttribute("aria-label", button.title);
-    copyResetTimers.set(button, setTimeout(() => resetCopyButton(button), 1000));
+    copyResetTimers.set(button, setTimeout(() => resetCopyButton(button), 3000));
   };
   actions.appendChild(button);
 }
@@ -772,10 +811,7 @@ function cleanEmptyMessageDecorations() {
 }
 
 function removeEmptyMessageDecorations(group) {
-  const previous = group.previousElementSibling;
   group.remove();
-  // 普通 assistant 气泡的名字头就在组上方；删掉服务对象后别留一行空名字。
-  if (previous?.classList.contains("ta-head")) previous.remove();
   cleanEmptyMessageDecorations();
 }
 
@@ -1040,8 +1076,13 @@ function addBubble(kind, text) {
     div.textContent = text;
     messagesEl.appendChild(div);
   } else {
-    const group = document.createElement("div");
-    group.className = `msg-group ${kind === "me" ? "me" : "ta"}`;
+    let group = kind === "me" ? null : pendingAssistantGroup;
+    if (!group) {
+      group = document.createElement("div");
+      group.className = `msg-group msg-block ${kind === "me" ? "me" : "ta"}`;
+      if (kind !== "me") group.classList.add(kind === "gpt" ? "gpt-block" : "maisui-block");
+      messagesEl.appendChild(group);
+    }
     const actions = document.createElement("div");
     actions.className = "msg-actions";
     setBubbleText(div, text);
@@ -1050,10 +1091,27 @@ function addBubble(kind, text) {
     else addRerunButton(div, actions);
     addDeleteButton(div, actions);
     group.append(div, actions);
-    messagesEl.appendChild(group);
+    if (kind !== "me") pendingAssistantGroup = null;
   }
+  if (!renderingHistory && !stickToBottom && kind !== "me") noteUnread();
   scrollDown();
   return div;
+}
+
+function addUsage(bubble, usage) {
+  const actions = bubble?.closest(".msg-group")?.querySelector(":scope > .msg-actions");
+  if (!actions || actions.querySelector(".tokens")) return;
+  const tokens = Number(usage?.tokens);
+  const cache = Number(usage?.cache);
+  if (!Number.isFinite(tokens) || !Number.isFinite(cache)) return;
+  const stat = document.createElement("span");
+  stat.className = "tokens";
+  const cacheEl = document.createElement("b");
+  cacheEl.textContent = `cache ${Math.max(0, cache).toLocaleString("en-US")}`;
+  const separator = document.createElement("b");
+  separator.textContent = "·";
+  stat.append(`${Math.max(0, tokens).toLocaleString("en-US")} tokens`, separator, cacheEl);
+  actions.appendChild(stat);
 }
 
 function addHalfMark(bubble, reason = "interrupted") {
@@ -1061,7 +1119,7 @@ function addHalfMark(bubble, reason = "interrupted") {
   if (!group || group.querySelector(".half-mark")) return;
   const mark = document.createElement("div");
   mark.className = "half-mark";
-  mark.textContent = reason === "error" ? "⏹ 这轮没说完就断了" : "⏹ 这轮说到一半被打断";
+  mark.textContent = reason === "error" ? "这轮没说完就断了" : "这轮说到一半被打断";
   group.insertBefore(mark, group.querySelector(".msg-actions"));
 }
 
@@ -1071,17 +1129,36 @@ let stickToBottom = true;
 messagesEl.addEventListener("scroll", () => {
   const gap = messagesEl.scrollHeight - (messagesEl.scrollTop + messagesEl.clientHeight);
   stickToBottom = gap < 40;
+  if (stickToBottom) unreadCount = 0;
+  updateBottomControl(gap);
 });
+
+function updateBottomControl(gap) {
+  const distance = gap ?? messagesEl.scrollHeight - (messagesEl.scrollTop + messagesEl.clientHeight);
+  toBottomEl.hidden = distance <= messagesEl.clientHeight;
+  toBottomBadgeEl.hidden = unreadCount === 0;
+  toBottomBadgeEl.textContent = unreadCount > 99 ? "99+" : String(unreadCount);
+}
+
+function noteUnread() {
+  unreadCount++;
+  updateBottomControl();
+}
 
 function scrollDown() {
   if (stickToBottom) messagesEl.scrollTop = messagesEl.scrollHeight;
+  updateBottomControl();
 }
 
 // 用户主动动作触发（发消息、拍一拍、打开会话）：无条件回底。
 function forceScrollDown() {
   stickToBottom = true;
+  unreadCount = 0;
   messagesEl.scrollTop = messagesEl.scrollHeight;
+  updateBottomControl(0);
 }
+
+toBottomEl.onclick = forceScrollDown;
 
 // 把回复渲染成排版好的样子（加粗、列表、代码块）
 function renderMd(el, text) {
@@ -1105,27 +1182,80 @@ function resetTurnView() {
   renderTurnStatus();
 }
 
+function showSendFailure(entry, message = "没发出去") {
+  if (!entry?.state?.isConnected) return;
+  entry.state.className = "send-state fail";
+  entry.state.textContent = message;
+  const retry = document.createElement("button");
+  retry.type = "button";
+  retry.textContent = "重试";
+  retry.onclick = () => {
+    if (busy || !ws || ws.readyState !== 1) {
+      entry.state.firstChild.textContent = "连接还没恢复";
+      return;
+    }
+    const group = entry.bubble.closest(".msg-group");
+    const index = pendingSends.indexOf(entry);
+    if (index >= 0) pendingSends.splice(index, 1);
+    group?.remove();
+    dispatchChat(entry.text, entry.attachments.map((attachment) => ({ ...attachment })), false);
+  };
+  entry.state.appendChild(retry);
+}
+
+function trackPendingSend(bubble, text, attachments) {
+  const state = document.createElement("div");
+  state.className = "send-state sending";
+  state.textContent = "发送中…";
+  bubble.closest(".msg-group")?.appendChild(state);
+  const entry = {
+    bubble,
+    state,
+    text,
+    attachments: attachments.map((attachment) => ({ ...attachment })),
+  };
+  pendingSends.push(entry);
+  return entry;
+}
+
+function confirmPendingSend() {
+  const entry = pendingSends.shift();
+  entry?.state.remove();
+}
+
+function failPendingSends() {
+  for (const entry of pendingSends.splice(0)) showSendFailure(entry);
+}
+
 function dispatchChat(text, attachments, clearComposer) {
   const sentDraftKey = draftStorageKey();
   const wireAttachments = attachments.map(({ _thumb, ...attachment }) => attachment);
   const payload = { type: "chat", sessionId, text, attachments: wireAttachments, model: modelSelect.value || undefined };
   // 待建群聊的首条消息带 mode:"group"；后端只在新建会话时认，发完就清
   if (pendingMode) payload.mode = pendingMode;
-  ws.send(JSON.stringify(payload));
-  pendingMode = null;
   maybeStamp();
   const bubble = addBubble("me", text);
   // attachToBubble 的 before 是插最前面，倒着喂才能保持选择顺序
   for (const attachment of [...attachments].reverse()) attachToBubble(bubble, attachment, true);
+  const pendingSend = trackPendingSend(bubble, text, wireAttachments);
   if (clearComposer) {
     clearPending();
     inputEl.value = "";
     autoGrow();
     localStorage.removeItem(sentDraftKey);
   }
+  try {
+    ws.send(JSON.stringify(payload));
+    pendingMode = null;
+  } catch {
+    const index = pendingSends.indexOf(pendingSend);
+    if (index >= 0) pendingSends.splice(index, 1);
+    showSendFailure(pendingSend);
+    return;
+  }
   busy = true;
   dotEl.classList.add("busy");
-  statusTextEl.textContent = "正在干活…";
+  setHeaderStatus("正在干活…");
   sendBtn.hidden = true;
   stopBtn.hidden = false;
   showTyping();
@@ -1258,10 +1388,17 @@ function clearPending() {
 function attachToBubble(bubble, att, before) {
   let el;
   if (att.kind === "image") {
+    if (!(bubbleRawText.get(bubble) || "").trim()) bubble.classList.add("image-only");
     el = document.createElement("img");
     el.className = "att-img";
-    el.src = `/uploads/${att.file}?token=${encodeURIComponent(token)}`;
+    el.src = att._thumb || `/uploads/${att.file}?token=${encodeURIComponent(token)}`;
+    el.alt = att.name || "图片附件";
     el.loading = "lazy";
+    el.onclick = () => {
+      imageViewerImgEl.src = el.src;
+      imageViewerImgEl.alt = el.alt;
+      imageViewerEl.hidden = false;
+    };
   } else {
     el = document.createElement("div");
     el.className = "att-file";
@@ -1284,6 +1421,7 @@ modelSelect.onchange = () => {
   if (modelSelect.value === "__custom") return handleCustomModel();
   if (modelSelect.value) localStorage.setItem("home_model", modelSelect.value);
   else localStorage.removeItem("home_model");
+  setHeaderStatus(statusTextEl.dataset.state || "在线");
 };
 
 // —— 模型列表：订阅一组（写死仨别名）、外部一组（现拉）、手填一组（本机记住） ——
@@ -1329,6 +1467,7 @@ function rebuildModelOptions() {
     modelSelect.value = "";
     localStorage.removeItem("home_model");
   }
+  setHeaderStatus(statusTextEl.dataset.state || "在线");
 }
 
 function handleCustomModel() {
@@ -1367,13 +1506,25 @@ function patNote(messageId) {
   messagesEl.appendChild(note);
   scrollDown();
 }
+
+function closeImageViewer() {
+  imageViewerEl.hidden = true;
+  imageViewerImgEl.removeAttribute("src");
+}
+$("imageViewerClose").onclick = closeImageViewer;
+imageViewerEl.onclick = (event) => {
+  if (event.target === imageViewerEl) closeImageViewer();
+};
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape" && !imageViewerEl.hidden) closeImageViewer();
+});
 function sendPat() {
   if (busy || !ws || ws.readyState !== 1) return;
   maybeStamp();
   patNote();
   busy = true;
   dotEl.classList.add("busy");
-  statusTextEl.textContent = "正在干活…";
+  setHeaderStatus("正在干活…");
   sendBtn.hidden = true;
   stopBtn.hidden = false;
   showTyping();
@@ -1606,6 +1757,7 @@ async function doRename(sess) {
     body: JSON.stringify({ title }),
   });
   if (!res.ok) return addBubble("error", "改名失败");
+  if (sess.id === sessionId && chatArea !== "group") setChatTitle(title);
   loadSessions();
 }
 
@@ -1693,6 +1845,7 @@ function renderMessage(m) {
       }
       renderMd(bubble, m.text);
       if (m.interrupted) addHalfMark(bubble, m.incompleteReason);
+      if (m.usage) addUsage(bubble, m.usage);
     }
   }
 }
@@ -1729,7 +1882,9 @@ function loadOlder() {
   // 不然下一条新消息会拿"更早那段"当基准，多插一行也可能少插一行
   const savedStampTime = lastStampTime;
   lastStampTime = 0;
+  renderingHistory = true;
   for (const m of chunk) renderMessage(m);
+  renderingHistory = false;
   lastStampTime = savedStampTime;
   for (const node of saved) messagesEl.appendChild(node);
 
@@ -1747,6 +1902,7 @@ async function openSession(id) {
   // 打开哪个区的会话就落在哪个区（初始恢复上次会话时靠这行自动定区）
   chatArea = record.mode === "group" ? "group" : "solo";
   updateAreaLabels();
+  setChatTitle(chatArea === "group" ? "议事厅" : record.title);
   messagesEl.innerHTML = "";
   pendingOlderMessages = null;
   lastStampTime = 0;
@@ -1754,12 +1910,17 @@ async function openSession(id) {
   restoreDraft();
 
   const all = record.messages;
-  if (all.length > CHAT_CHUNK) {
-    pendingOlderMessages = all.slice(0, -CHAT_CHUNK);
-    addLoadOlderButton();
-    for (const m of all.slice(-CHAT_CHUNK)) renderMessage(m);
-  } else {
-    for (const m of all) renderMessage(m);
+  renderingHistory = true;
+  try {
+    if (all.length > CHAT_CHUNK) {
+      pendingOlderMessages = all.slice(0, -CHAT_CHUNK);
+      addLoadOlderButton();
+      for (const m of all.slice(-CHAT_CHUNK)) renderMessage(m);
+    } else {
+      for (const m of all) renderMessage(m);
+    }
+  } finally {
+    renderingHistory = false;
   }
 
   attachCurrentSession();
@@ -1768,7 +1929,7 @@ async function openSession(id) {
   loadSessions();
 }
 
-$("newChat").onclick = () => {
+function startNewChat() {
   cancelEdit();
   sessionId = null;
   localStorage.removeItem("home_session");
@@ -1779,15 +1940,21 @@ $("newChat").onclick = () => {
   lastStampTime = 0;
   // 在议事厅里点＋就是开新群聊，单聊区照旧
   pendingMode = chatArea === "group" ? "group" : null;
+  setChatTitle(chatArea === "group" ? "议事厅" : "新会话");
   restoreDraft();
   if (chatArea === "group") addChanNote("新议事：泽 + 麦穗 + GPT，发第一条消息就开张");
   closeDrawer();
-};
+}
+$("newChat").onclick = startNewChat;
+$("headerNewChat").onclick = startNewChat;
 
 // 议事厅（工具页入口）→ 群聊区；心形爱心 → 单聊区。两区列表互不掺和
 function updateAreaLabels() {
   const group = chatArea === "group";
-  $("whoName").textContent = group ? "议事厅" : "麦穗";
+  chatEl.classList.toggle("group-mode", group);
+  chatEl.classList.toggle("solo-mode", !group);
+  setChatTitle(group ? "议事厅" : "麦穗");
+  setHeaderStatus(statusTextEl.dataset.state || "在线");
   $("drawerTitle").textContent = group ? "议事厅" : "会话";
 }
 

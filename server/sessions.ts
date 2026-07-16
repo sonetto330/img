@@ -23,6 +23,8 @@ export interface StoredMessage {
   /** 主动打断或报错时存下来的半截回复，刷新后仍要显示没说完标记 */
   interrupted?: true;
   incompleteReason?: "interrupted" | "error";
+  /** 一轮回复的展示账单；历史记录没有就不显示 */
+  usage?: { tokens: number; cache: number };
   attachments?: Attachment[];
   at: string;
 }

@@ -1249,13 +1249,18 @@ wss.on("connection", (ws: WebSocket, req) => {
                 sendTurnEvent(turn, { type: "error", message: apiErrorNote(apiError) });
               }
               if (clean) {
-                record.messages.push({ id: randomUUID(), role: "assistant", text: clean, tools, thinking, at: new Date().toISOString() });
+                const displayUsage = usage ? { tokens: usage.inputTotal, cache: usage.cacheRead } : undefined;
+                record.messages.push({ id: randomUUID(), role: "assistant", text: clean, tools, thinking, usage: displayUsage, at: new Date().toISOString() });
                 store.save(record);
                 // 后台异步提取记忆碎片；不 await、出错不影响主聊天
                 scheduleExtractionIfNeeded(record);
               }
               const attachedSend = turn.outRef.send;
-              sendTurnEvent(turn, { type: "done", text: clean });
+              sendTurnEvent(turn, {
+                type: "done",
+                text: clean,
+                usage: usage ? { tokens: usage.inputTotal, cache: usage.cacheRead } : undefined,
+              });
               finishActiveTurn(turn);
               if (!anyoneWatching()) barkPush(apiError ? "麦穗（出错）" : "麦穗", clean || apiError || "这轮没说出话").catch(() => {});
               maybeAutoCompact(record, usage, attachedSend);
