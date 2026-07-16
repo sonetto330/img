@@ -11,6 +11,7 @@ export interface Attachment {
 }
 
 export interface StoredMessage {
+  id?: string;
   role: "user" | "assistant";
   /** 群聊里这条 assistant 消息是谁说的（如 "gpt"）；缺省 = 麦穗 */
   speaker?: string;
@@ -71,6 +72,17 @@ export class SessionStore {
   get(id: string): SessionRecord | null {
     try {
       const record = JSON.parse(fs.readFileSync(this.file(id), "utf8")) as SessionRecord;
+      // 旧会话第一次读到时给所有消息补齐 id。直接写文件，不借 save，避免迁移把
+      // updatedAt 改成现在、让一批旧会话突然顶到列表最上面。
+      let addedMessageIds = false;
+      for (const message of record.messages) {
+        if (message.id) continue;
+        message.id = randomUUID();
+        addedMessageIds = true;
+      }
+      if (addedMessageIds) {
+        fs.writeFileSync(this.file(record.id), JSON.stringify(record, null, 2));
+      }
       // 旧数据可能没 mode，按 chat 处理，别在别处每次判空
       if (!record.mode) record.mode = "chat";
       return record;
@@ -80,6 +92,10 @@ export class SessionStore {
   }
 
   save(record: SessionRecord): void {
+    // group.ts 也会直接追加 GPT 消息；在存盘边界兜底，保证所有新消息落库就有 id。
+    for (const message of record.messages) {
+      if (!message.id) message.id = randomUUID();
+    }
     record.updatedAt = new Date().toISOString();
     fs.writeFileSync(this.file(record.id), JSON.stringify(record, null, 2));
   }
@@ -99,6 +115,19 @@ export class SessionStore {
     record.title = title.slice(0, 60) || record.title;
     this.save(record);
     return record;
+  }
+
+  deleteMessage(id: string, messageId: string): { index: number } | null {
+    const record = this.get(id);
+    if (!record) return null;
+    const index = record.messages.findIndex((message) => message.id === messageId);
+    if (index < 0) return null;
+    record.messages.splice(index, 1);
+    delete record.claudeSessionId;
+    delete record.codexThreadId;
+    record.codexSeenCount = 0;
+    this.save(record);
+    return { index };
   }
 
   /** 挪进/挪出文件夹：folder 传空串就是移出。整理动作不该把会话顶到列表最上面，所以不动 updatedAt */

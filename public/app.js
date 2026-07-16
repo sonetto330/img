@@ -297,6 +297,7 @@ const ICONS = {
   copy: SVG('<rect x="8" y="8" width="11" height="11" rx="2"/><path d="M16 8V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h3"/>'),
   copied: SVG('<polyline points="4 12 9 17 20 6"/>'),
   copyFail: SVG('<line x1="6" y1="6" x2="18" y2="18"/><line x1="18" y1="6" x2="6" y2="18"/>'),
+  trash: SVG('<path d="M4 7h16M9 7V4h6v3M7 7l1 13h8l1-13M10 11v5M14 11v5"/>'),
 };
 const TOOL_ICON_KEYS = [
   ["read", "read"], ["glob", "glob"], ["grep", "grep"], ["search", "web"], ["fetch", "web"],
@@ -462,7 +463,10 @@ function addChanNote(text) {
 }
 
 const bubbleRawText = new WeakMap();
+const bubbleMessageIds = new WeakMap();
 const copyResetTimers = new WeakMap();
+const deleteResetTimers = new WeakMap();
+let armedDeleteButton = null;
 
 // https 外优先走现代剪贴板；http 入口用老办法兜底
 async function writeClipboard(text) {
@@ -516,6 +520,144 @@ function addCopyButton(bubble, actions) {
   actions.appendChild(button);
 }
 
+function resetDeleteButton(button) {
+  const timer = deleteResetTimers.get(button);
+  if (timer) clearTimeout(timer);
+  deleteResetTimers.delete(button);
+  button.disabled = false;
+  button.classList.remove("delete-confirm", "delete-failed");
+  button.innerHTML = ICONS.trash;
+  button.title = "删除";
+  button.setAttribute("aria-label", "删除消息");
+  if (armedDeleteButton === button) armedDeleteButton = null;
+}
+
+function failDeleteButton(button, text) {
+  if (armedDeleteButton && armedDeleteButton !== button) resetDeleteButton(armedDeleteButton);
+  resetDeleteButton(button);
+  button.classList.add("delete-failed");
+  button.textContent = text;
+  button.title = text;
+  button.setAttribute("aria-label", text);
+  deleteResetTimers.set(button, setTimeout(() => resetDeleteButton(button), 1600));
+}
+
+function armDeleteButton(button) {
+  if (armedDeleteButton && armedDeleteButton !== button) resetDeleteButton(armedDeleteButton);
+  resetDeleteButton(button);
+  armedDeleteButton = button;
+  button.classList.add("delete-confirm");
+  button.textContent = "删除？";
+  button.title = "再点一次删除";
+  button.setAttribute("aria-label", "再点一次删除消息");
+  deleteResetTimers.set(button, setTimeout(() => resetDeleteButton(button), 3000));
+}
+
+function bubbleDirection(bubble) {
+  return bubble.classList.contains("me") ? "user" : "assistant";
+}
+
+async function resolveBubbleMessageId(bubble) {
+  const known = bubbleMessageIds.get(bubble);
+  if (known) return known;
+  if (!sessionId) return null;
+
+  const record = await api(`/api/sessions/${sessionId}`);
+  if (!Array.isArray(record.messages)) return null;
+  const role = bubbleDirection(bubble);
+  const text = bubbleRawText.get(bubble);
+  if (typeof text !== "string") return null;
+
+  let occurrence = 0;
+  let foundBubble = false;
+  for (const candidate of messagesEl.querySelectorAll(".msg-group > .msg")) {
+    if (bubbleDirection(candidate) !== role || bubbleRawText.get(candidate) !== text) continue;
+    if (candidate === bubble) {
+      foundBubble = true;
+      break;
+    }
+    occurrence++;
+  }
+  if (!foundBubble) return null;
+  const match = record.messages.filter((message) => message.role === role && message.text === text)[occurrence];
+  if (!match?.id) return null;
+  bubbleMessageIds.set(bubble, match.id);
+  return match.id;
+}
+
+function removeEmptyMessageDecorations(group) {
+  const previous = group.previousElementSibling;
+  group.remove();
+  // 普通 assistant 气泡的名字头就在组上方；删掉服务对象后别留一行空名字。
+  if (previous?.classList.contains("ta-head")) previous.remove();
+  // 一个时间戳管到下一个时间戳为止；区间里已经没有消息组就一并收掉。
+  for (const stamp of messagesEl.querySelectorAll(".msg.stamp")) {
+    let node = stamp.nextElementSibling;
+    let hasMessage = false;
+    while (node && !node.matches(".msg.stamp")) {
+      if (node.matches(".msg-group")) {
+        hasMessage = true;
+        break;
+      }
+      node = node.nextElementSibling;
+    }
+    if (!hasMessage) stamp.remove();
+  }
+}
+
+async function deleteBubble(bubble, button) {
+  let messageId;
+  try {
+    messageId = await resolveBubbleMessageId(bubble);
+  } catch {
+    return failDeleteButton(button, "删除失败");
+  }
+  if (!messageId) return failDeleteButton(button, "这条还没落库");
+
+  try {
+    const res = await fetch(`/api/sessions/${sessionId}/messages?token=${encodeURIComponent(token)}`, {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id: messageId }),
+    });
+    const body = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(body.error || "删除失败");
+    const group = bubble.closest(".msg-group");
+    if (group) removeEmptyMessageDecorations(group);
+    if (armedDeleteButton === button) armedDeleteButton = null;
+    loadSessions().catch(() => {});
+  } catch (error) {
+    failDeleteButton(button, error.message || "删除失败");
+  }
+}
+
+function addDeleteButton(bubble, actions) {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "delete-btn";
+  resetDeleteButton(button);
+  button.onclick = async (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    if (busy) return failDeleteButton(button, "正在说话");
+    if (!button.classList.contains("delete-confirm")) return armDeleteButton(button);
+
+    const timer = deleteResetTimers.get(button);
+    if (timer) clearTimeout(timer);
+    deleteResetTimers.delete(button);
+    armedDeleteButton = null;
+    button.disabled = true;
+    button.textContent = "删除中…";
+    await deleteBubble(bubble, button);
+  };
+  actions.appendChild(button);
+}
+
+// 确认态只留给紧接着的第二击；点页面任何别处都复原。
+document.addEventListener("click", () => {
+  if (armedDeleteButton) resetDeleteButton(armedDeleteButton);
+});
+
 function setBubbleText(bubble, text) {
   const raw = text ?? "";
   bubbleRawText.set(bubble, raw);
@@ -538,6 +680,7 @@ function addBubble(kind, text) {
     actions.className = "msg-actions";
     setBubbleText(div, text);
     addCopyButton(div, actions);
+    addDeleteButton(div, actions);
     group.append(div, actions);
     messagesEl.appendChild(group);
   }
@@ -1107,10 +1250,12 @@ function renderMessage(m) {
         patNote();
       } else {
         const bubble = addBubble("me", m.text || "");
+        if (m.id) bubbleMessageIds.set(bubble, m.id);
         for (const att of m.attachments || []) attachToBubble(bubble, att, true);
       }
     } else {
       const bubble = addBubble(isGpt ? "gpt" : "ta", "");
+      if (m.id) bubbleMessageIds.set(bubble, m.id);
       renderMd(bubble, m.text);
     }
   }

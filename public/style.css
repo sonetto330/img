@@ -178,6 +178,28 @@ header button#backHome { font-size: 18px; }
 .copy-btn:active { color: var(--ink); transform: scale(.92); }
 .copy-btn.copied { color: var(--online); }
 .copy-btn.copy-failed { color: #b64525; }
+.delete-btn {
+  width: 24px; height: 22px; padding: 3px 4px;
+  display: inline-flex; align-items: center; justify-content: center;
+  border: 0; border-radius: 6px;
+  background: transparent; color: var(--muted);
+  cursor: pointer; touch-action: manipulation;
+  font: 12px/18px var(--prose); white-space: nowrap;
+  transition: color .15s ease, background-color .15s ease, transform .1s ease;
+}
+.delete-btn svg { width: 16px; height: 16px; pointer-events: none; }
+.delete-btn:hover, .delete-btn:focus-visible { color: #b64525; background: rgba(182, 69, 37, .08); }
+.delete-btn:active { transform: scale(.92); }
+.delete-btn.delete-confirm {
+  width: auto; min-width: 52px; padding: 2px 8px;
+  color: #fff; background: #b64525; border-radius: 999px;
+}
+.delete-btn.delete-confirm:hover, .delete-btn.delete-confirm:focus-visible { color: #fff; background: #a23a20; }
+.delete-btn.delete-failed {
+  width: auto; min-width: 52px; padding: 2px 8px;
+  color: #a33f22; background: #fbe9e4; border-radius: 999px;
+}
+.delete-btn:disabled { cursor: default; transform: none; }
 
 /* Markdown 渲染后的气泡 */
 .msg.md { white-space: normal; }

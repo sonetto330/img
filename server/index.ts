@@ -83,6 +83,33 @@ function nowString(): string {
   return `${d.getFullYear()}年${d.getMonth() + 1}月${d.getDate()}日 ${wd} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
+const HISTORY_REPLAY_MAX_MESSAGE = 2000;
+const HISTORY_REPLAY_MAX_TOTAL = 60000;
+
+/** transcript 失效后，用仍在存档里的消息给新会话补回上下文。 */
+function buildHistoryReplay(messages: SessionRecord["messages"]): string {
+  const lines = messages.map((message) => {
+    const speaker = message.role === "user" ? "泽" : message.speaker === "gpt" ? "GPT" : "麦穗";
+    const text = message.text.length > HISTORY_REPLAY_MAX_MESSAGE
+      ? `${message.text.slice(0, HISTORY_REPLAY_MAX_MESSAGE)}…（截断）`
+      : message.text;
+    return `${speaker}：${text}`;
+  });
+  let omitted = 0;
+  const render = () => [
+    "【历史重放】这个窗口此前的对话记录如下（服务器重建了你的记忆，照常接着聊，不用向泽解释这件事）：",
+    omitted ? `（更早的 ${omitted} 条记录已省略）` : "",
+    ...lines.slice(omitted),
+    "【重放结束】接下来是泽刚发来的新消息：",
+  ].filter(Boolean).join("\n");
+  let replay = render();
+  while (replay.length > HISTORY_REPLAY_MAX_TOTAL && omitted < lines.length) {
+    omitted++;
+    replay = render();
+  }
+  return replay;
+}
+
 function sendJson(res: http.ServerResponse, status: number, body: unknown): void {
   res.writeHead(status, { "Content-Type": "application/json; charset=utf-8" });
   res.end(JSON.stringify(body));
@@ -431,7 +458,7 @@ const server = http.createServer((req, res) => {
           const d = new Date();
           record.title = `通话 ${d.getMonth() + 1}.${d.getDate()}`;
         }
-        record.messages.push({ role: "user", text: userText, at: new Date().toISOString() });
+        record.messages.push({ id: randomUUID(), role: "user", text: userText, at: new Date().toISOString() });
         store.save(record);
         // 通话走老的 resume 路：同会话有常驻进程时先收干净，防止 fork 分叉
         await dropPooled(record.id);
@@ -489,7 +516,7 @@ const server = http.createServer((req, res) => {
         }
         if (!replyText.trim()) throw new Error("这轮没说出话来");
 
-        record.messages.push({ role: "assistant", text: replyText, at: new Date().toISOString() });
+        record.messages.push({ id: randomUUID(), role: "assistant", text: replyText, at: new Date().toISOString() });
         store.save(record);
 
         const { audio: reply, contentType } = await synthesize(replyText);
@@ -594,6 +621,37 @@ const server = http.createServer((req, res) => {
     }
     const record = store.get(sessionMatch[1]);
     return record ? sendJson(res, 200, record) : sendJson(res, 404, { error: "没有这个会话" });
+  }
+  const messageDeleteMatch = url.pathname.match(/^\/api\/sessions\/([0-9a-f-]{36})\/messages$/);
+  if (messageDeleteMatch && req.method === "DELETE") {
+    if (!authed(url)) return sendJson(res, 401, { error: "口令不对" });
+    const record = store.get(messageDeleteMatch[1]);
+    if (!record) return sendJson(res, 404, { error: "没有这个会话" });
+    if (pool.get(record.id)?.session.busy) {
+      return sendJson(res, 409, { error: "正在说话，这轮说完再删" });
+    }
+    const chunks: Buffer[] = [];
+    req.on("data", (c: Buffer) => chunks.push(c));
+    req.on("end", async () => {
+      let body: { id?: string };
+      try {
+        body = JSON.parse(Buffer.concat(chunks).toString("utf8") || "{}");
+      } catch {
+        return sendJson(res, 400, { error: "消息格式不对" });
+      }
+      const messageId = String(body.id || "").trim();
+      if (!messageId) return sendJson(res, 400, { error: "消息格式不对" });
+      // 收 body 的间隙也可能刚好起了一轮，落刀前再看一次。
+      if (pool.get(record.id)?.session.busy) {
+        return sendJson(res, 409, { error: "正在说话，这轮说完再删" });
+      }
+      await dropPooled(record.id);
+      const deleted = store.deleteMessage(record.id, messageId);
+      return deleted
+        ? sendJson(res, 200, { ok: true })
+        : sendJson(res, 409, { error: "消息对不上，刷新后再试" });
+    });
+    return;
   }
   const renameMatch = url.pathname.match(/^\/api\/sessions\/([0-9a-f-]{36})\/rename$/);
   if (renameMatch && req.method === "POST") {
@@ -716,7 +774,7 @@ wss.on("connection", (ws: WebSocket, req) => {
       const record = (msg.sessionId && store.get(msg.sessionId)) || store.create();
       if (compacting.has(record.id)) return send({ type: "error", message: "这个会话正在瘦身，等几秒再拍" });
       // 拍一拍不改标题；存历史用固定文本，前端识别后显示成居中小字
-      record.messages.push({ role: "user", text: "（拍了拍你）", at: new Date().toISOString() });
+      record.messages.push({ id: randomUUID(), role: "user", text: "（拍了拍你）", at: new Date().toISOString() });
       store.save(record);
       send({ type: "session", sessionId: record.id, title: record.title, mode: record.mode });
 
@@ -767,7 +825,7 @@ wss.on("connection", (ws: WebSocket, req) => {
                 send({ type: "error", message: apiErrorNote(apiError) });
               }
               if (clean) {
-                record.messages.push({ role: "assistant", text: clean, tools, at: new Date().toISOString() });
+                record.messages.push({ id: randomUUID(), role: "assistant", text: clean, tools, at: new Date().toISOString() });
                 store.save(record);
               }
               send({ type: "done", text: clean });
@@ -819,7 +877,11 @@ wss.on("connection", (ws: WebSocket, req) => {
     if (record.messages.length === 0) {
       record.title = (text || attachments[0]?.name || "新会话").slice(0, 24);
     }
-    record.messages.push({ role: "user", text, attachments, at: new Date().toISOString() });
+    // 必须在追加本轮用户消息前判断；重放只含此前历史，当前消息放在重放结束标记之后。
+    const replayMessages = !record.claudeSessionId && record.messages.length > 0
+      ? record.messages.slice()
+      : null;
+    record.messages.push({ id: randomUUID(), role: "user", text, attachments, at: new Date().toISOString() });
     store.save(record);
     send({ type: "session", sessionId: record.id, title: record.title, mode: record.mode });
 
@@ -829,8 +891,9 @@ wss.on("connection", (ws: WebSocket, req) => {
       .join("\n");
     const base = attLines ? `${attLines}\n\n${text || "（没写字，看内容吧）"}` : text;
     // 群聊：上一轮 GPT 的发言前置进来，麦穗才看得到（GPT 的话不单独烧他一轮）
-    const gptLines = unseenGptLines(record);
-    const prompt = gptLines ? `${gptLines}\n\n${base}` : base;
+    const replayBlock = replayMessages ? buildHistoryReplay(replayMessages) : "";
+    const gptLines = replayBlock ? "" : unseenGptLines(record);
+    const prompt = replayBlock ? `${replayBlock}\n${base}` : gptLines ? `${gptLines}\n\n${base}` : base;
 
     // 检索记忆：全模式生效。await 期间用一个占位 handle 锁住 active，防止连发消息触发并发
     const preparing: TurnHandle = { interrupt: async () => {} };
@@ -953,7 +1016,7 @@ wss.on("connection", (ws: WebSocket, req) => {
                 send({ type: "error", message: apiErrorNote(apiError) });
               }
               if (clean) {
-                record.messages.push({ role: "assistant", text: clean, tools, thinking, at: new Date().toISOString() });
+                record.messages.push({ id: randomUUID(), role: "assistant", text: clean, tools, thinking, at: new Date().toISOString() });
                 store.save(record);
                 // 后台异步提取记忆碎片；不 await、出错不影响主聊天
                 scheduleExtractionIfNeeded(record);
