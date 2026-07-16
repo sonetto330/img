@@ -19,14 +19,32 @@ function speakerName(m: StoredMessage): string {
   return m.speaker === GPT_SPEAKER ? "GPT" : "麦穗";
 }
 
+/** 上传目录：跟 index.ts 同一套算法，附件的 file 字段都落在这里 */
+const UPLOADS_DIR = path.join(path.resolve(process.env.WORKSPACE_DIR || path.join(root, "workspace")), "uploads");
+
 /** 把一条历史消息排成给 GPT 看的台词行；没内容（纯空消息）返回 null */
 function lineFor(m: StoredMessage): string | null {
   if (m.text === "（拍了拍你）") return "泽：（拍了拍麦穗）";
   const att = (m.attachments || [])
-    .map((a) => `[发来${a.kind === "image" ? "图片" : "文件"}「${a.name}」——你看不到内容，只知道有这么个东西]`)
+    .map((a) => a.kind === "image"
+      ? `[发来图片「${a.name}」，已附在本条消息里，你能直接看]`
+      : `[发来文件「${a.name}」——你看不到内容，只知道有这么个东西]`)
     .join("");
   const body = [att, m.text?.trim()].filter(Boolean).join(" ");
   return body ? `${speakerName(m)}：${body}` : null;
+}
+
+/** 收集这批消息里真实存在的图片文件绝对路径（给 codex -i 用）；丢了的文件跳过别炸轮 */
+function imagePathsFor(messages: StoredMessage[]): string[] {
+  const out: string[] = [];
+  for (const m of messages) {
+    for (const a of m.attachments || []) {
+      if (a.kind !== "image") continue;
+      const p = path.join(UPLOADS_DIR, a.file);
+      if (fs.existsSync(p)) out.push(p);
+    }
+  }
+  return out;
 }
 
 /** GPT 说"这轮我不说话"的暗号；开场白里约定的是 [沉默] */
@@ -74,11 +92,10 @@ export function maybeRunGptTurn(opts: GptTurnOpts): boolean {
   }
 
   const upTo = record.messages.length;
-  const fresh = record.messages
-    .slice(record.codexSeenCount ?? 0, upTo)
-    .map(lineFor)
-    .filter((l): l is string => !!l);
+  const freshMessages = record.messages.slice(record.codexSeenCount ?? 0, upTo);
+  const fresh = freshMessages.map(lineFor).filter((l): l is string => !!l);
   if (!fresh.length) return false;
+  const images = imagePathsFor(freshMessages);
 
   let prompt = fresh.join("\n\n");
   if (!record.codexThreadId) {
@@ -96,7 +113,7 @@ export function maybeRunGptTurn(opts: GptTurnOpts): boolean {
   send({ type: "gpt_start" });
   let finished = false; // spawn 失败时 onError 同步触发；标记住，别在下面把死 handle 挂回 active
   const handle = runCodexTurn(
-    { prompt, threadId: record.codexThreadId },
+    { prompt, threadId: record.codexThreadId, images },
     {
       onThreadId(threadId) {
         record.codexThreadId = threadId;

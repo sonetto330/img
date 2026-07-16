@@ -86,6 +86,25 @@ function configPairs(args: string[]): string[] {
   check("resume：沙箱用配置键给", configPairs(args).includes('sandbox_mode="read-only"'));
 }
 
+// ---- 图片附件 ----
+{
+  const args = buildCodexArgs({ prompt: "看图", images: ["C:\\up\\a.jpg", "C:\\up\\b.png"] });
+  const first = args.indexOf("-i");
+  check("首轮：每张图一个 -i", first > 0 && args[first + 1] === "C:\\up\\a.jpg"
+    && args[first + 2] === "-i" && args[first + 3] === "C:\\up\\b.png");
+  check("首轮：带图时 prompt 仍在末尾", args[args.length - 1] === "看图");
+
+  const tid = "019f646e-ae0d-73a0-817b-8e4151c0395e";
+  const rargs = buildCodexArgs({ prompt: "再看", threadId: tid, images: ["C:\\up\\c.webp"] });
+  const ri = rargs.indexOf("-i");
+  check("resume：也带 -i", ri > 0 && rargs[ri + 1] === "C:\\up\\c.webp");
+  check("resume：带图时顺序仍是 exec resume <tid> <prompt>",
+    rargs[0] === "exec" && rargs[1] === "resume" && rargs[2] === tid && rargs[3] === "再看");
+
+  const none = buildCodexArgs({ prompt: "无图" });
+  check("不给图时没有 -i", !none.includes("-i"));
+}
+
 // ---- 指令文件缺失时明确报错，不静默回退 ----
 {
   const bak = INSTRUCTIONS_FILE + ".bak-test";

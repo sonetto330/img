@@ -106,8 +106,9 @@ function minimalConfig(): string[] {
  * 组装 codex exec 的完整参数。纯函数，方便测试。
  * 首轮走 `exec`（带 -C 中性工作目录）；后续轮走 `exec resume <threadId>`
  * （resume 子命令不认 -C/-s，沙箱用 -c sandbox_mode 统一给）。
+ * images：随本轮 prompt 附上的图片绝对路径，-i 逐个给（exec/resume 都认这面旗）。
  */
-export function buildCodexArgs(opts: { prompt: string; threadId?: string; model?: string }): string[] {
+export function buildCodexArgs(opts: { prompt: string; threadId?: string; model?: string; images?: string[] }): string[] {
   if (!fs.existsSync(INSTRUCTIONS_FILE)) {
     throw new Error(`陪伴基础指令文件缺失：${INSTRUCTIONS_FILE}，拒绝以开发型指令启动 Codex`);
   }
@@ -117,6 +118,7 @@ export function buildCodexArgs(opts: { prompt: string; threadId?: string; model?
     "--skip-git-repo-check",
     ...minimalConfig(),
     "--json",
+    ...(opts.images ?? []).flatMap((f) => ["-i", f]),
   ];
   if (opts.threadId) {
     return ["exec", "resume", opts.threadId, opts.prompt, ...shared];
@@ -140,7 +142,7 @@ interface CodexEvent {
  * 一轮一进程（codex exec 天然如此），会话连续性靠 thread resume。
  */
 export function runCodexTurn(
-  opts: { prompt: string; threadId?: string; model?: string },
+  opts: { prompt: string; threadId?: string; model?: string; images?: string[] },
   cb: CodexTurnCallbacks,
 ): TurnHandle {
   let child: ChildProcess | null = null;
