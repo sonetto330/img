@@ -178,7 +178,7 @@ header button#backHome { font-size: 18px; }
 .copy-btn:active { color: var(--ink); transform: scale(.92); }
 .copy-btn.copied { color: var(--online); }
 .copy-btn.copy-failed { color: #b64525; }
-.delete-btn {
+.msg-action-btn {
   width: 24px; height: 22px; padding: 3px 4px;
   display: inline-flex; align-items: center; justify-content: center;
   border: 0; border-radius: 6px;
@@ -187,19 +187,21 @@ header button#backHome { font-size: 18px; }
   font: 12px/18px var(--prose); white-space: nowrap;
   transition: color .15s ease, background-color .15s ease, transform .1s ease;
 }
-.delete-btn svg { width: 16px; height: 16px; pointer-events: none; }
+.msg-action-btn svg { width: 16px; height: 16px; pointer-events: none; }
+.edit-btn:hover, .edit-btn:focus-visible,
+.rerun-btn:hover, .rerun-btn:focus-visible { color: var(--ink); background: rgba(210, 192, 165, .16); }
 .delete-btn:hover, .delete-btn:focus-visible { color: #b64525; background: rgba(182, 69, 37, .08); }
-.delete-btn:active { transform: scale(.92); }
-.delete-btn.delete-confirm {
+.msg-action-btn:active { transform: scale(.92); }
+.msg-action-btn.action-confirm {
   width: auto; min-width: 52px; padding: 2px 8px;
   color: #fff; background: #b64525; border-radius: 999px;
 }
-.delete-btn.delete-confirm:hover, .delete-btn.delete-confirm:focus-visible { color: #fff; background: #a23a20; }
-.delete-btn.delete-failed {
+.msg-action-btn.action-confirm:hover, .msg-action-btn.action-confirm:focus-visible { color: #fff; background: #a23a20; }
+.msg-action-btn.action-failed {
   width: auto; min-width: 52px; padding: 2px 8px;
   color: #a33f22; background: #fbe9e4; border-radius: 999px;
 }
-.delete-btn:disabled { cursor: default; transform: none; }
+.msg-action-btn:disabled { cursor: default; transform: none; }
 
 /* Markdown 渲染后的气泡 */
 .msg.md { white-space: normal; }
@@ -370,6 +372,22 @@ header button#backHome { font-size: 18px; }
 .pending-chip .chip-remove:hover { color: var(--accent); }
 
 /* —— 底部输入区 —— */
+.edit-hint {
+  width: min(100% - 48px, 640px);
+  align-self: center;
+  display: flex; align-items: center; justify-content: center; flex-wrap: wrap;
+  gap: 3px;
+  padding: 4px 12px 0;
+  color: var(--muted); font-size: 12px; line-height: 1.45;
+  text-align: center;
+}
+.edit-hint.failed { color: #a33f22; }
+.edit-hint button {
+  border: 0; padding: 0 2px; background: none;
+  color: inherit; font: inherit; cursor: pointer;
+}
+.edit-hint button:hover, .edit-hint button:focus-visible { color: var(--ink); }
+
 /* 输入区：加号、输入框、发送键同住一枚浮起的胶囊（照泽给的参考图） */
 footer {
   display: flex; gap: 4px; align-items: flex-end;

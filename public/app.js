@@ -298,6 +298,7 @@ const ICONS = {
   copied: SVG('<polyline points="4 12 9 17 20 6"/>'),
   copyFail: SVG('<line x1="6" y1="6" x2="18" y2="18"/><line x1="18" y1="6" x2="6" y2="18"/>'),
   trash: SVG('<path d="M4 7h16M9 7V4h6v3M7 7l1 13h8l1-13M10 11v5M14 11v5"/>'),
+  rerun: SVG('<path d="M20 7v5h-5M4 17v-5h5"/><path d="M6.1 8.5A7 7 0 0 1 18.7 7L20 12M4 12l1.3 5A7 7 0 0 0 17.9 15.5"/>'),
 };
 const TOOL_ICON_KEYS = [
   ["read", "read"], ["glob", "glob"], ["grep", "grep"], ["search", "web"], ["fetch", "web"],
@@ -465,8 +466,13 @@ function addChanNote(text) {
 const bubbleRawText = new WeakMap();
 const bubbleMessageIds = new WeakMap();
 const copyResetTimers = new WeakMap();
-const deleteResetTimers = new WeakMap();
-let armedDeleteButton = null;
+const actionResetTimers = new WeakMap();
+const actionButtonConfigs = new WeakMap();
+let armedActionButton = null;
+let pendingEdit = null;
+let pendingEditPreviousAt = null;
+let editSubmitting = false;
+let editHintEl = null;
 
 // https 外优先走现代剪贴板；http 入口用老办法兜底
 async function writeClipboard(text) {
@@ -520,37 +526,55 @@ function addCopyButton(bubble, actions) {
   actions.appendChild(button);
 }
 
-function resetDeleteButton(button) {
-  const timer = deleteResetTimers.get(button);
+function resetActionButton(button) {
+  const config = actionButtonConfigs.get(button);
+  if (!config) return;
+  const timer = actionResetTimers.get(button);
   if (timer) clearTimeout(timer);
-  deleteResetTimers.delete(button);
+  actionResetTimers.delete(button);
   button.disabled = false;
-  button.classList.remove("delete-confirm", "delete-failed");
-  button.innerHTML = ICONS.trash;
-  button.title = "删除";
-  button.setAttribute("aria-label", "删除消息");
-  if (armedDeleteButton === button) armedDeleteButton = null;
+  button.classList.remove("action-confirm", "action-failed");
+  button.innerHTML = config.icon;
+  button.title = config.title;
+  button.setAttribute("aria-label", config.ariaLabel);
+  if (armedActionButton === button) armedActionButton = null;
 }
 
-function failDeleteButton(button, text) {
-  if (armedDeleteButton && armedDeleteButton !== button) resetDeleteButton(armedDeleteButton);
-  resetDeleteButton(button);
-  button.classList.add("delete-failed");
+function failActionButton(button, text) {
+  if (armedActionButton && armedActionButton !== button) resetActionButton(armedActionButton);
+  resetActionButton(button);
+  button.classList.add("action-failed");
   button.textContent = text;
   button.title = text;
   button.setAttribute("aria-label", text);
-  deleteResetTimers.set(button, setTimeout(() => resetDeleteButton(button), 1600));
+  actionResetTimers.set(button, setTimeout(() => resetActionButton(button), 1600));
 }
 
-function armDeleteButton(button) {
-  if (armedDeleteButton && armedDeleteButton !== button) resetDeleteButton(armedDeleteButton);
-  resetDeleteButton(button);
-  armedDeleteButton = button;
-  button.classList.add("delete-confirm");
-  button.textContent = "删除？";
-  button.title = "再点一次删除";
-  button.setAttribute("aria-label", "再点一次删除消息");
-  deleteResetTimers.set(button, setTimeout(() => resetDeleteButton(button), 3000));
+function armActionButton(button) {
+  const config = actionButtonConfigs.get(button);
+  if (!config) return;
+  if (armedActionButton && armedActionButton !== button) resetActionButton(armedActionButton);
+  resetActionButton(button);
+  armedActionButton = button;
+  button.classList.add("action-confirm");
+  button.textContent = config.confirmText;
+  button.title = config.confirmTitle;
+  button.setAttribute("aria-label", config.confirmAriaLabel);
+  actionResetTimers.set(button, setTimeout(() => resetActionButton(button), 3000));
+}
+
+function prepareActionButton(button, config) {
+  actionButtonConfigs.set(button, config);
+  resetActionButton(button);
+}
+
+function startAction(button, text) {
+  const timer = actionResetTimers.get(button);
+  if (timer) clearTimeout(timer);
+  actionResetTimers.delete(button);
+  if (armedActionButton === button) armedActionButton = null;
+  button.disabled = true;
+  button.textContent = text;
 }
 
 function bubbleDirection(bubble) {
@@ -559,7 +583,11 @@ function bubbleDirection(bubble) {
 
 async function resolveBubbleMessageId(bubble) {
   const known = bubbleMessageIds.get(bubble);
-  if (known) return known;
+  if (known) {
+    const group = bubble.closest(".msg-group");
+    if (group) group.dataset.messageId = known;
+    return known;
+  }
   if (!sessionId) return null;
 
   const record = await api(`/api/sessions/${sessionId}`);
@@ -582,20 +610,18 @@ async function resolveBubbleMessageId(bubble) {
   const match = record.messages.filter((message) => message.role === role && message.text === text)[occurrence];
   if (!match?.id) return null;
   bubbleMessageIds.set(bubble, match.id);
+  const group = bubble.closest(".msg-group");
+  if (group) group.dataset.messageId = match.id;
   return match.id;
 }
 
-function removeEmptyMessageDecorations(group) {
-  const previous = group.previousElementSibling;
-  group.remove();
-  // 普通 assistant 气泡的名字头就在组上方；删掉服务对象后别留一行空名字。
-  if (previous?.classList.contains("ta-head")) previous.remove();
-  // 一个时间戳管到下一个时间戳为止；区间里已经没有消息组就一并收掉。
+function cleanEmptyMessageDecorations() {
+  // 一个时间戳管到下一个时间戳为止；区间里已经没有消息组或拍一拍就一并收掉。
   for (const stamp of messagesEl.querySelectorAll(".msg.stamp")) {
     let node = stamp.nextElementSibling;
     let hasMessage = false;
     while (node && !node.matches(".msg.stamp")) {
-      if (node.matches(".msg-group")) {
+      if (node.matches(".msg-group, .msg.pat")) {
         hasMessage = true;
         break;
       }
@@ -605,14 +631,71 @@ function removeEmptyMessageDecorations(group) {
   }
 }
 
+function removeEmptyMessageDecorations(group) {
+  const previous = group.previousElementSibling;
+  group.remove();
+  // 普通 assistant 气泡的名字头就在组上方；删掉服务对象后别留一行空名字。
+  if (previous?.classList.contains("ta-head")) previous.remove();
+  cleanEmptyMessageDecorations();
+}
+
+function removeMessageTail(start) {
+  let node = start;
+  while (node) {
+    const next = node.nextElementSibling;
+    node.remove();
+    node = next;
+  }
+  cleanEmptyMessageDecorations();
+  if (armedActionButton && !armedActionButton.isConnected) armedActionButton = null;
+}
+
+function setLastStampBefore(record, index) {
+  const at = index > 0 ? new Date(record.messages[index - 1].at).getTime() : 0;
+  lastStampTime = Number.isFinite(at) ? at : 0;
+}
+
+function messageNodeById(messageId) {
+  for (const node of messagesEl.children) {
+    if (node.dataset?.messageId === messageId) return node;
+  }
+  return null;
+}
+
+function findUserTailStart(assistantBubble, userMessage) {
+  const known = userMessage.id && messageNodeById(userMessage.id);
+  if (known) return known;
+  let node = assistantBubble.closest(".msg-group")?.previousElementSibling;
+  while (node) {
+    if (userMessage.text === "（拍了拍你）" && node.matches(".msg.pat")) return node;
+    if (node.matches(".msg-group.me")) {
+      const bubble = node.querySelector(":scope > .msg.me");
+      if (bubble && bubbleRawText.get(bubble) === userMessage.text) return node;
+    }
+    node = node.previousElementSibling;
+  }
+  return null;
+}
+
+async function truncateSession(fromId) {
+  const res = await fetch(`/api/sessions/${sessionId}/truncate?token=${encodeURIComponent(token)}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ fromId }),
+  });
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(body.error || "操作失败");
+  return body;
+}
+
 async function deleteBubble(bubble, button) {
   let messageId;
   try {
     messageId = await resolveBubbleMessageId(bubble);
   } catch {
-    return failDeleteButton(button, "删除失败");
+    return failActionButton(button, "删除失败");
   }
-  if (!messageId) return failDeleteButton(button, "这条还没落库");
+  if (!messageId) return failActionButton(button, "这条还没落库");
 
   try {
     const res = await fetch(`/api/sessions/${sessionId}/messages?token=${encodeURIComponent(token)}`, {
@@ -624,30 +707,173 @@ async function deleteBubble(bubble, button) {
     if (!res.ok) throw new Error(body.error || "删除失败");
     const group = bubble.closest(".msg-group");
     if (group) removeEmptyMessageDecorations(group);
-    if (armedDeleteButton === button) armedDeleteButton = null;
+    if (pendingEdit) cancelEdit();
     loadSessions().catch(() => {});
   } catch (error) {
-    failDeleteButton(button, error.message || "删除失败");
+    failActionButton(button, error.message || "删除失败");
   }
+}
+
+function showEditHint(text = "编辑中：发送将替换这条及之后的所有消息 · 附件会保留", failed = false) {
+  if (!editHintEl) {
+    editHintEl = document.createElement("div");
+    editHintEl.className = "edit-hint";
+    const label = document.createElement("span");
+    const cancel = document.createElement("button");
+    cancel.type = "button";
+    cancel.textContent = "[取消]";
+    cancel.onclick = (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      cancelEdit();
+    };
+    editHintEl.append(label, cancel);
+    const footer = inputEl.closest("footer");
+    footer.parentNode.insertBefore(editHintEl, footer);
+  }
+  editHintEl.querySelector("span").textContent = text;
+  editHintEl.classList.toggle("failed", failed);
+}
+
+function cancelEdit() {
+  pendingEdit = null;
+  pendingEditPreviousAt = null;
+  editSubmitting = false;
+  editHintEl?.remove();
+  editHintEl = null;
+}
+
+async function beginEdit(bubble, button) {
+  let messageId;
+  try {
+    messageId = await resolveBubbleMessageId(bubble);
+  } catch {
+    return failActionButton(button, "这条还没落库");
+  }
+  if (!messageId) return failActionButton(button, "这条还没落库");
+  try {
+    const record = await api(`/api/sessions/${sessionId}`);
+    const index = record.messages?.findIndex((message) => message.id === messageId) ?? -1;
+    const message = index >= 0 ? record.messages[index] : null;
+    if (!message || message.role !== "user") return failActionButton(button, "这条还没落库");
+    pendingEdit = {
+      messageId,
+      attachments: (message.attachments || []).map((attachment) => ({ ...attachment })),
+    };
+    pendingEditPreviousAt = index > 0 ? record.messages[index - 1].at : null;
+    inputEl.value = bubbleRawText.get(bubble) || "";
+    autoGrow();
+    saveDraft();
+    showEditHint();
+    inputEl.focus();
+    resetActionButton(button);
+  } catch {
+    failActionButton(button, "这条还没落库");
+  }
+}
+
+function addEditButton(bubble, actions) {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "msg-action-btn edit-btn";
+  prepareActionButton(button, {
+    icon: ICONS.edit,
+    title: "编辑",
+    ariaLabel: "编辑消息",
+    confirmText: "编辑？",
+    confirmTitle: "再点一次编辑",
+    confirmAriaLabel: "再点一次编辑消息",
+  });
+  button.onclick = async (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    if (busy) return failActionButton(button, "正在说话");
+    if (!button.classList.contains("action-confirm")) return armActionButton(button);
+    startAction(button, "打开中…");
+    await beginEdit(bubble, button);
+  };
+  actions.appendChild(button);
+}
+
+async function rerunBubble(bubble, button) {
+  let messageId;
+  try {
+    messageId = await resolveBubbleMessageId(bubble);
+  } catch {
+    return failActionButton(button, "这条还没落库");
+  }
+  if (!messageId) return failActionButton(button, "这条还没落库");
+
+  try {
+    const record = await api(`/api/sessions/${sessionId}`);
+    const assistantIndex = record.messages?.findIndex((message) => message.id === messageId) ?? -1;
+    if (assistantIndex < 0) return failActionButton(button, "这条还没落库");
+    let userIndex = assistantIndex - 1;
+    while (userIndex >= 0 && record.messages[userIndex].role !== "user") userIndex--;
+    if (userIndex < 0) return failActionButton(button, "没找到可重跑的消息");
+    if (busy) return failActionButton(button, "正在说话");
+
+    const userMessage = record.messages[userIndex];
+    if (!userMessage.id) return failActionButton(button, "没找到可重跑的消息");
+    let start = findUserTailStart(bubble, userMessage);
+    if (!start) {
+      start = Array.from(messagesEl.children).find((node) => node.id !== "loadOlderBtn") || null;
+    }
+    await truncateSession(userMessage.id);
+    if (pendingOlderMessages) {
+      const retained = new Set(record.messages.slice(0, userIndex).map((message) => message.id));
+      pendingOlderMessages = pendingOlderMessages.filter((message) => retained.has(message.id));
+    }
+    if (pendingEdit) cancelEdit();
+    if (start) removeMessageTail(start);
+    setLastStampBefore(record, userIndex);
+    dispatchChat(userMessage.text || "", (userMessage.attachments || []).map((attachment) => ({ ...attachment })), false);
+    loadSessions().catch(() => {});
+  } catch (error) {
+    failActionButton(button, error.message || "操作失败");
+  }
+}
+
+function addRerunButton(bubble, actions) {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "msg-action-btn rerun-btn";
+  prepareActionButton(button, {
+    icon: ICONS.rerun,
+    title: "重新说",
+    ariaLabel: "重新生成回复",
+    confirmText: "重新说？",
+    confirmTitle: "再点一次重新说",
+    confirmAriaLabel: "再点一次重新生成回复",
+  });
+  button.onclick = async (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    if (!button.classList.contains("action-confirm")) return armActionButton(button);
+    startAction(button, "重跑中…");
+    await rerunBubble(bubble, button);
+  };
+  actions.appendChild(button);
 }
 
 function addDeleteButton(bubble, actions) {
   const button = document.createElement("button");
   button.type = "button";
-  button.className = "delete-btn";
-  resetDeleteButton(button);
+  button.className = "msg-action-btn delete-btn";
+  prepareActionButton(button, {
+    icon: ICONS.trash,
+    title: "删除",
+    ariaLabel: "删除消息",
+    confirmText: "删除？",
+    confirmTitle: "再点一次删除",
+    confirmAriaLabel: "再点一次删除消息",
+  });
   button.onclick = async (event) => {
     event.preventDefault();
     event.stopPropagation();
-    if (busy) return failDeleteButton(button, "正在说话");
-    if (!button.classList.contains("delete-confirm")) return armDeleteButton(button);
-
-    const timer = deleteResetTimers.get(button);
-    if (timer) clearTimeout(timer);
-    deleteResetTimers.delete(button);
-    armedDeleteButton = null;
-    button.disabled = true;
-    button.textContent = "删除中…";
+    if (busy) return failActionButton(button, "正在说话");
+    if (!button.classList.contains("action-confirm")) return armActionButton(button);
+    startAction(button, "删除中…");
     await deleteBubble(bubble, button);
   };
   actions.appendChild(button);
@@ -655,7 +881,7 @@ function addDeleteButton(bubble, actions) {
 
 // 确认态只留给紧接着的第二击；点页面任何别处都复原。
 document.addEventListener("click", () => {
-  if (armedDeleteButton) resetDeleteButton(armedDeleteButton);
+  if (armedActionButton) resetActionButton(armedActionButton);
 });
 
 function setBubbleText(bubble, text) {
@@ -680,6 +906,8 @@ function addBubble(kind, text) {
     actions.className = "msg-actions";
     setBubbleText(div, text);
     addCopyButton(div, actions);
+    if (kind === "me") addEditButton(div, actions);
+    else addRerunButton(div, actions);
     addDeleteButton(div, actions);
     group.append(div, actions);
     messagesEl.appendChild(group);
@@ -719,14 +947,10 @@ function renderMd(el, text) {
   scrollDown();
 }
 
-function sendMessage() {
-  const text = inputEl.value.trim();
-  const ready = pending.filter((p) => !p.uploading);
-  if ((!text && ready.length === 0) || busy || !ws || ws.readyState !== 1) return;
-  if (pending.some((p) => p.uploading)) return addBubble("error", "附件还在上传，稍等一下");
-  const attachments = ready.map(({ _thumb, ...att }) => att);
+function dispatchChat(text, attachments, clearComposer) {
   const sentDraftKey = draftStorageKey();
-  const payload = { type: "chat", sessionId, text, attachments, model: modelSelect.value || undefined };
+  const wireAttachments = attachments.map(({ _thumb, ...attachment }) => attachment);
+  const payload = { type: "chat", sessionId, text, attachments: wireAttachments, model: modelSelect.value || undefined };
   // 待建群聊的首条消息带 mode:"group"；后端只在新建会话时认，发完就清
   if (pendingMode) payload.mode = pendingMode;
   ws.send(JSON.stringify(payload));
@@ -734,11 +958,13 @@ function sendMessage() {
   maybeStamp();
   const bubble = addBubble("me", text);
   // attachToBubble 的 before 是插最前面，倒着喂才能保持选择顺序
-  for (const att of [...ready].reverse()) attachToBubble(bubble, att, true);
-  clearPending();
-  inputEl.value = "";
-  autoGrow();
-  localStorage.removeItem(sentDraftKey);
+  for (const attachment of [...attachments].reverse()) attachToBubble(bubble, attachment, true);
+  if (clearComposer) {
+    clearPending();
+    inputEl.value = "";
+    autoGrow();
+    localStorage.removeItem(sentDraftKey);
+  }
   busy = true;
   dotEl.classList.add("busy");
   statusTextEl.textContent = "正在干活…";
@@ -747,6 +973,47 @@ function sendMessage() {
   showTyping();
   // 你刚发了消息，肯定想看到，无条件贴底
   forceScrollDown();
+}
+
+async function sendEditedMessage(text, ready) {
+  if (editSubmitting || !pendingEdit) return;
+  editSubmitting = true;
+  const edit = pendingEdit;
+  const previousAt = pendingEditPreviousAt;
+  showEditHint("正在替换这条及之后的消息…");
+  try {
+    await truncateSession(edit.messageId);
+    const start = messageNodeById(edit.messageId);
+    const attachments = [
+      ...edit.attachments.map((attachment) => ({ ...attachment })),
+      ...ready,
+    ];
+    cancelEdit();
+    if (start) removeMessageTail(start);
+    const at = previousAt ? new Date(previousAt).getTime() : 0;
+    lastStampTime = Number.isFinite(at) ? at : 0;
+    dispatchChat(text, attachments, true);
+    loadSessions().catch(() => {});
+  } catch (error) {
+    editSubmitting = false;
+    showEditHint(error.message || "操作失败", true);
+  }
+}
+
+function sendMessage() {
+  const text = inputEl.value.trim();
+  const ready = pending.filter((p) => !p.uploading);
+  if (pendingEdit) {
+    if (busy) return showEditHint("正在说话", true);
+    if (!ws || ws.readyState !== 1) return showEditHint("连接断了，重连后再发", true);
+    if (pending.some((p) => p.uploading)) return addBubble("error", "附件还在上传，稍等一下");
+    if (!text && pendingEdit.attachments.length === 0 && ready.length === 0) return;
+    void sendEditedMessage(text, ready);
+    return;
+  }
+  if ((!text && ready.length === 0) || busy || !ws || ws.readyState !== 1) return;
+  if (pending.some((p) => p.uploading)) return addBubble("error", "附件还在上传，稍等一下");
+  dispatchChat(text, ready, true);
 }
 
 // —— 附件（可多个）——
@@ -934,10 +1201,11 @@ sendBtn.onclick = sendMessage;
 stopBtn.onclick = () => ws?.send(JSON.stringify({ type: "interrupt" }));
 
 // —— 拍一拍：双击头像 ——
-function patNote() {
+function patNote(messageId) {
   const note = document.createElement("div");
   note.className = "msg pat";
   note.textContent = "你拍了拍麦穗";
+  if (messageId) note.dataset.messageId = messageId;
   messagesEl.appendChild(note);
   scrollDown();
 }
@@ -1223,6 +1491,7 @@ async function doDelete(sess) {
   });
   if (!res.ok) return addBubble("error", "删除失败");
   if (sess.id === sessionId) {
+    cancelEdit();
     sessionId = null;
     localStorage.removeItem("home_session");
     messagesEl.innerHTML = "";
@@ -1247,15 +1516,21 @@ function renderMessage(m) {
   if (m.text || m.attachments?.length) {
     if (m.role === "user") {
       if (m.text === "（拍了拍你）" && !m.attachments?.length) {
-        patNote();
+        patNote(m.id);
       } else {
         const bubble = addBubble("me", m.text || "");
-        if (m.id) bubbleMessageIds.set(bubble, m.id);
+        if (m.id) {
+          bubbleMessageIds.set(bubble, m.id);
+          bubble.closest(".msg-group").dataset.messageId = m.id;
+        }
         for (const att of m.attachments || []) attachToBubble(bubble, att, true);
       }
     } else {
       const bubble = addBubble(isGpt ? "gpt" : "ta", "");
-      if (m.id) bubbleMessageIds.set(bubble, m.id);
+      if (m.id) {
+        bubbleMessageIds.set(bubble, m.id);
+        bubble.closest(".msg-group").dataset.messageId = m.id;
+      }
       renderMd(bubble, m.text);
     }
   }
@@ -1304,6 +1579,7 @@ function loadOlder() {
 
 async function openSession(id) {
   const record = await api(`/api/sessions/${id}`);
+  cancelEdit();
   sessionId = record.id;
   localStorage.setItem("home_session", sessionId);
   // 打开哪个区的会话就落在哪个区（初始恢复上次会话时靠这行自动定区）
@@ -1330,6 +1606,7 @@ async function openSession(id) {
 }
 
 $("newChat").onclick = () => {
+  cancelEdit();
   sessionId = null;
   localStorage.removeItem("home_session");
   messagesEl.innerHTML = "";
@@ -1358,6 +1635,7 @@ async function enterChatArea(area) {
   }
   chatArea = area;
   updateAreaLabels();
+  cancelEdit();
   sessionId = null;
   localStorage.removeItem("home_session");
   messagesEl.innerHTML = "";

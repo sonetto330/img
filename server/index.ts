@@ -653,6 +653,37 @@ const server = http.createServer((req, res) => {
     });
     return;
   }
+  const truncateMatch = url.pathname.match(/^\/api\/sessions\/([0-9a-f-]{36})\/truncate$/);
+  if (truncateMatch && req.method === "POST") {
+    if (!authed(url)) return sendJson(res, 401, { error: "口令不对" });
+    const record = store.get(truncateMatch[1]);
+    if (!record) return sendJson(res, 404, { error: "没有这个会话" });
+    if (pool.get(record.id)?.session.busy) {
+      return sendJson(res, 409, { error: "正在说话，这轮说完再操作" });
+    }
+    const chunks: Buffer[] = [];
+    req.on("data", (c: Buffer) => chunks.push(c));
+    req.on("end", async () => {
+      let body: { fromId?: unknown };
+      try {
+        body = JSON.parse(Buffer.concat(chunks).toString("utf8") || "{}");
+      } catch {
+        return sendJson(res, 400, { error: "消息格式不对" });
+      }
+      const fromId = typeof body?.fromId === "string" ? body.fromId.trim() : "";
+      if (!fromId) return sendJson(res, 400, { error: "消息格式不对" });
+      // 收 body 的间隙也可能刚好起了一轮，落刀前再看一次。
+      if (pool.get(record.id)?.session.busy) {
+        return sendJson(res, 409, { error: "正在说话，这轮说完再操作" });
+      }
+      await dropPooled(record.id);
+      const truncated = store.truncateFrom(record.id, fromId);
+      return truncated
+        ? sendJson(res, 200, { ok: true, removed: truncated.removed })
+        : sendJson(res, 409, { error: "消息对不上，刷新后再试" });
+    });
+    return;
+  }
   const renameMatch = url.pathname.match(/^\/api\/sessions\/([0-9a-f-]{36})\/rename$/);
   if (renameMatch && req.method === "POST") {
     if (!authed(url)) return sendJson(res, 401, { error: "口令不对" });

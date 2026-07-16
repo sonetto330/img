@@ -130,6 +130,20 @@ export class SessionStore {
     return { index };
   }
 
+  truncateFrom(id: string, messageId: string): { index: number; removed: number } | null {
+    const record = this.get(id);
+    if (!record) return null;
+    const index = record.messages.findIndex((message) => message.id === messageId);
+    if (index < 0) return null;
+    const removed = record.messages.length - index;
+    record.messages.splice(index);
+    delete record.claudeSessionId;
+    delete record.codexThreadId;
+    record.codexSeenCount = 0;
+    this.save(record);
+    return { index, removed };
+  }
+
   /** 挪进/挪出文件夹：folder 传空串就是移出。整理动作不该把会话顶到列表最上面，所以不动 updatedAt */
   setFolder(id: string, folder: string): SessionRecord | null {
     const record = this.get(id);
