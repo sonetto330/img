@@ -20,6 +20,9 @@ export interface StoredMessage {
   tools?: Array<string | { name: string; detail?: string }>;
   /** 这条回复前的思考过程；没开思考就没有 */
   thinking?: { text: string; ms: number };
+  /** 主动打断或报错时存下来的半截回复，刷新后仍要显示没说完标记 */
+  interrupted?: true;
+  incompleteReason?: "interrupted" | "error";
   attachments?: Attachment[];
   at: string;
 }

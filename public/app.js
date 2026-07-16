@@ -13,6 +13,9 @@ const sendBtn = $("sendBtn");
 const stopBtn = $("stopBtn");
 const dotEl = $("dot");
 const statusTextEl = $("statusText");
+const turnStatusEl = $("turnStatus");
+const turnStatusTextEl = $("turnStatusText");
+const turnStatusBeatEl = $("turnStatusBeat");
 const drawerEl = $("drawer");
 const maskEl = $("mask");
 const listEl = $("sessionList");
@@ -27,6 +30,73 @@ let pendingMode = null; // "议事厅"入口进来时是 "group"，随首条消�
 let chatArea = "solo"; // 当前聊天区："solo"=跟麦穗单聊（心形进），"group"=议事厅（工具页进）；抽屉列表按区过滤
 let liveSpeaker = null; // 当前 live 气泡属于谁："gpt" 或 null（麦穗）
 let gptHeadEl = null; // GPT 的名字头：gpt_start 先放上，delta 复用，沉默时收掉
+let connectionLost = false;
+let turnState = "idle";
+let turnToolName = null;
+let turnLastProgressAt = null;
+let turnStatusSpeaker = null;
+
+function attachCurrentSession() {
+  if (ws?.readyState === 1) ws.send(JSON.stringify({ type: "attach", sessionId }));
+}
+
+function progressAgeSeconds() {
+  const at = new Date(turnLastProgressAt || 0).getTime();
+  return Number.isFinite(at) ? Math.max(0, Math.floor((Date.now() - at) / 1000)) : 0;
+}
+
+function renderTurnStatus() {
+  turnStatusEl.className = "status-strip";
+  if (connectionLost) {
+    turnStatusEl.hidden = false;
+    turnStatusEl.classList.add("st-off");
+    turnStatusTextEl.textContent = "连接断开，重连中…";
+    turnStatusBeatEl.textContent = "";
+    return;
+  }
+  if (turnState === "idle") {
+    turnStatusEl.hidden = true;
+    return;
+  }
+  turnStatusEl.hidden = false;
+  const age = progressAgeSeconds();
+  if (turnState === "running_tool") {
+    turnStatusEl.classList.add("st-tool");
+    turnStatusTextEl.textContent = `正在跑工具：${turnToolName || "处理中"}`;
+    turnStatusBeatEl.textContent = `${age} 秒前`;
+  } else if (age >= 30) {
+    turnStatusEl.classList.add("st-wait");
+    turnStatusTextEl.textContent = `仍在等待，最后进展于 ${age} 秒前`;
+    turnStatusBeatEl.textContent = "";
+  } else {
+    turnStatusEl.classList.add("st-model");
+    turnStatusTextEl.textContent = turnStatusSpeaker === "gpt" ? "正在等 GPT 回话…" : "正在等他回话…";
+    turnStatusBeatEl.textContent = `${age} 秒前`;
+  }
+}
+
+function applyTurnStatus(msg) {
+  if (msg.state === "idle") {
+    turnState = "idle";
+    turnToolName = null;
+    turnLastProgressAt = null;
+    turnStatusSpeaker = null;
+    renderTurnStatus();
+    finishTurn();
+    return;
+  }
+  turnState = msg.state;
+  turnToolName = msg.toolName || null;
+  turnLastProgressAt = msg.lastProgressAt || turnLastProgressAt || new Date().toISOString();
+  turnStatusSpeaker = msg.speaker || null;
+  busy = true;
+  dotEl.classList.add("busy");
+  sendBtn.hidden = true;
+  stopBtn.hidden = false;
+  renderTurnStatus();
+}
+
+setInterval(renderTurnStatus, 1000);
 
 // —— WebSocket ——
 function connect() {
@@ -34,22 +104,40 @@ function connect() {
   dotEl.classList.add("off");
   ws = new WebSocket(`${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/ws?token=${encodeURIComponent(token)}`);
   ws.onopen = () => {
+    connectionLost = false;
     dotEl.classList.remove("off");
     if (!busy) statusTextEl.textContent = "在线";
+    renderTurnStatus();
+    attachCurrentSession();
   };
   ws.onmessage = (e) => handle(JSON.parse(e.data));
   ws.onclose = () => {
+    connectionLost = true;
     dotEl.classList.add("off");
-    if (!busy) statusTextEl.textContent = "已断线，重连中…";
+    statusTextEl.textContent = "已断线，重连中…";
+    renderTurnStatus();
     setTimeout(connect, 1500);
   };
 }
 
 function handle(msg) {
+  if (msg.type !== "session" && msg.sessionId && sessionId && msg.sessionId !== sessionId) return;
   switch (msg.type) {
     case "session":
       sessionId = msg.sessionId;
       localStorage.setItem("home_session", sessionId);
+      attachCurrentSession();
+      break;
+    case "turn_snapshot":
+      restoreTurnSnapshot(msg);
+      break;
+    case "status":
+      applyTurnStatus(msg);
+      break;
+    case "heartbeat":
+      turnLastProgressAt = msg.lastProgressAt || turnLastProgressAt;
+      if (msg.speaker) turnStatusSpeaker = msg.speaker;
+      renderTurnStatus();
       break;
     case "thinking":
       hideTyping();
@@ -130,6 +218,7 @@ function handle(msg) {
         }
         renderMd(bubble, msg.text);
       }
+      if (msg.interrupted && bubble) addHalfMark(bubble, msg.incompleteReason);
       finishTurn();
       loadSessions();
       break;
@@ -161,6 +250,7 @@ function handle(msg) {
       }
       // GPT 侧失败时麦穗的回复已经正常收完，只用收掉 GPT 的等待指示，别动他的气泡
       if (msg.speaker === "gpt") clearGptIndicator();
+      if (msg.interrupted && liveBubble) addHalfMark(liveBubble, msg.incompleteReason || "error");
       addBubble("error", msg.message);
       finishTurn();
       break;
@@ -184,6 +274,51 @@ function clearGptIndicator() {
   gptHeadEl = null;
 }
 
+function restoreTurnSnapshot(msg) {
+  applyTurnStatus({
+    state: msg.status,
+    toolName: msg.toolName,
+    lastProgressAt: msg.lastProgressAt,
+    speaker: msg.speaker,
+  });
+  hideTyping();
+  const speaker = msg.speaker === "gpt" ? "gpt" : null;
+  if (msg.partialThinking) {
+    if (!liveThinking) {
+      maybeStamp(msg.startedAt);
+      if (speaker === "gpt") {
+        if (!gptHeadEl) gptHeadEl = addTaHead(msg.startedAt, "GPT");
+      } else {
+        ensureTaHead();
+      }
+      liveThinking = newThinkingCard();
+    }
+    liveThinking.set(msg.partialThinking);
+  }
+  if (msg.partialText) {
+    if (!liveBubble || liveSpeaker !== speaker) {
+      if (liveBubble) renderMd(liveBubble, bubbleRawText.get(liveBubble) || "");
+      maybeStamp(msg.startedAt);
+      if (speaker === "gpt") {
+        if (!gptHeadEl) gptHeadEl = addTaHead(msg.startedAt, "GPT");
+        liveBubble = addBubble("gpt", "");
+      } else {
+        ensureTaHead();
+        liveBubble = addBubble("ta", "");
+      }
+      liveSpeaker = speaker;
+    }
+    // 快照是权威全量半截，覆盖页面已有内容；后续 delta 才从这里接着追加。
+    setBubbleText(liveBubble, msg.partialText);
+  } else if (speaker === "gpt") {
+    if (!gptHeadEl) gptHeadEl = addTaHead(msg.startedAt, "GPT");
+    showTyping();
+  } else {
+    showTyping();
+  }
+  forceScrollDown();
+}
+
 function finishTurn() {
   busy = false;
   liveBubble = null;
@@ -194,7 +329,7 @@ function finishTurn() {
   gptHeadEl = null;
   hideTyping();
   dotEl.classList.remove("busy");
-  statusTextEl.textContent = "在线";
+  statusTextEl.textContent = connectionLost ? "已断线，重连中…" : "在线";
   sendBtn.hidden = false;
   stopBtn.hidden = true;
   scrollDown();
@@ -265,6 +400,11 @@ function newThinkingCard(saved) {
     append(text) {
       box.classList.add("live");
       body.textContent += text;
+      scrollDown();
+    },
+    set(text) {
+      box.classList.add("live");
+      body.textContent = text;
       scrollDown();
     },
     finish(ms) {
@@ -916,6 +1056,15 @@ function addBubble(kind, text) {
   return div;
 }
 
+function addHalfMark(bubble, reason = "interrupted") {
+  const group = bubble?.closest(".msg-group");
+  if (!group || group.querySelector(".half-mark")) return;
+  const mark = document.createElement("div");
+  mark.className = "half-mark";
+  mark.textContent = reason === "error" ? "⏹ 这轮没说完就断了" : "⏹ 这轮说到一半被打断";
+  group.insertBefore(mark, group.querySelector(".msg-actions"));
+}
+
 // 你翻上去看历史时别打扰你：只有原本就贴底才跟着新消息滚。
 // 状态在你滚动时更新；发送新消息或打开会话时强制回到底部。
 let stickToBottom = true;
@@ -945,6 +1094,15 @@ function renderMd(el, text) {
     el.textContent = raw;
   }
   scrollDown();
+}
+
+function resetTurnView() {
+  turnState = "idle";
+  turnToolName = null;
+  turnLastProgressAt = null;
+  turnStatusSpeaker = null;
+  finishTurn();
+  renderTurnStatus();
 }
 
 function dispatchChat(text, attachments, clearComposer) {
@@ -1198,7 +1356,7 @@ rebuildModelOptions();            // 先用写死的仨 + 手填的画出来，�
 loadModels().catch(() => {});     // 再拉外部列表补上
 
 sendBtn.onclick = sendMessage;
-stopBtn.onclick = () => ws?.send(JSON.stringify({ type: "interrupt" }));
+stopBtn.onclick = () => ws?.send(JSON.stringify({ type: "interrupt", sessionId }));
 
 // —— 拍一拍：双击头像 ——
 function patNote(messageId) {
@@ -1494,6 +1652,8 @@ async function doDelete(sess) {
     cancelEdit();
     sessionId = null;
     localStorage.removeItem("home_session");
+    resetTurnView();
+    attachCurrentSession();
     messagesEl.innerHTML = "";
     lastStampTime = 0;
   }
@@ -1532,6 +1692,7 @@ function renderMessage(m) {
         bubble.closest(".msg-group").dataset.messageId = m.id;
       }
       renderMd(bubble, m.text);
+      if (m.interrupted) addHalfMark(bubble, m.incompleteReason);
     }
   }
 }
@@ -1582,6 +1743,7 @@ async function openSession(id) {
   cancelEdit();
   sessionId = record.id;
   localStorage.setItem("home_session", sessionId);
+  resetTurnView();
   // 打开哪个区的会话就落在哪个区（初始恢复上次会话时靠这行自动定区）
   chatArea = record.mode === "group" ? "group" : "solo";
   updateAreaLabels();
@@ -1600,6 +1762,7 @@ async function openSession(id) {
     for (const m of all) renderMessage(m);
   }
 
+  attachCurrentSession();
   forceScrollDown();
   closeDrawer();
   loadSessions();
@@ -1609,6 +1772,8 @@ $("newChat").onclick = () => {
   cancelEdit();
   sessionId = null;
   localStorage.removeItem("home_session");
+  resetTurnView();
+  attachCurrentSession();
   messagesEl.innerHTML = "";
   pendingOlderMessages = null;
   lastStampTime = 0;
@@ -1638,6 +1803,8 @@ async function enterChatArea(area) {
   cancelEdit();
   sessionId = null;
   localStorage.removeItem("home_session");
+  resetTurnView();
+  attachCurrentSession();
   messagesEl.innerHTML = "";
   pendingOlderMessages = null;
   lastStampTime = 0;

@@ -73,8 +73,12 @@ export interface GptTurnOpts {
   send: (payload: unknown) => void;
   /** 没人盯着屏幕时把 GPT 的话推到手机（Bark） */
   notifyIfAway: (title: string, body: string) => void;
-  /** 把 GPT 轮的 handle 挂到连接的 active 上（可打断）；结束时传 null 摘掉 */
+  /** 把 GPT 轮的 handle 挂到会话级注册项上（可打断）；结束时传 null 摘掉 */
   setActive: (handle: TurnHandle | null) => void;
+  /** 显式打断后旧回调可能晚到，不能再写库或把新轮收掉 */
+  isActive?: () => boolean;
+  /** GPT 已经吐出半截又报错时，由会话级轮注册表统一落库 */
+  persistIncomplete?: () => boolean;
 }
 
 /**
@@ -85,6 +89,8 @@ export interface GptTurnOpts {
  */
 export function maybeRunGptTurn(opts: GptTurnOpts): boolean {
   const { record, store, send, notifyIfAway, setActive } = opts;
+  const isActive = opts.isActive ?? (() => true);
+  const persistIncomplete = opts.persistIncomplete ?? (() => false);
   if (record.mode !== "group") return false;
   if (!codexAvailable()) {
     send({ type: "error", speaker: GPT_SPEAKER, message: "GPT 没上线：codex 不可用（CLI 没装，或登录凭证不在）" });
@@ -116,22 +122,25 @@ export function maybeRunGptTurn(opts: GptTurnOpts): boolean {
     { prompt, threadId: record.codexThreadId, images },
     {
       onThreadId(threadId) {
+        if (!isActive()) return;
         record.codexThreadId = threadId;
         store.save(record);
       },
       onMessage(text) {
+        if (!isActive()) return;
         // codex 不给增量，整段到达；借 delta 通道让前端先把气泡立起来
         send({ type: "delta", speaker: GPT_SPEAKER, text });
       },
       onDone(finalText) {
+        if (!isActive()) return;
         finished = true;
-        setActive(null);
         const text = finalText.trim();
         if (!text || isSilence(text)) {
           // 沉默不存档不展示，但这轮喂过的消息算它看过了（thread 里记得）
           record.codexSeenCount = upTo;
           store.save(record);
           send({ type: "done", speaker: GPT_SPEAKER, text: "" });
+          setActive(null);
           return;
         }
         record.messages.push({ role: "assistant", speaker: GPT_SPEAKER, text, at: new Date().toISOString() });
@@ -139,13 +148,16 @@ export function maybeRunGptTurn(opts: GptTurnOpts): boolean {
         store.save(record);
         send({ type: "done", speaker: GPT_SPEAKER, text });
         notifyIfAway("GPT", text);
+        setActive(null);
       },
       onError(message) {
+        if (!isActive()) return;
         // 失败不动 codexSeenCount：下轮把这批消息重喂一遍，顶多它见到重复台词
         finished = true;
-        setActive(null);
+        const interrupted = persistIncomplete();
         console.error(`[group] GPT 轮失败：${message}`);
-        send({ type: "error", speaker: GPT_SPEAKER, message: `GPT 这轮没跑起来：${message}` });
+        send({ type: "error", speaker: GPT_SPEAKER, message: `GPT 这轮没跑起来：${message}`, interrupted });
+        setActive(null);
       },
     },
   );
@@ -155,6 +167,7 @@ export function maybeRunGptTurn(opts: GptTurnOpts): boolean {
         // codex 的 interrupt 静默收掉、不走回调——这里补上摘 active 和收口事件，
         // 不然打断后 active 永远占着，泽再也发不出消息
         await handle.interrupt();
+        if (!isActive()) return;
         setActive(null);
         send({ type: "done", speaker: GPT_SPEAKER, text: "" });
         // codexSeenCount 不动：打断没喂完，下轮重喂这批
