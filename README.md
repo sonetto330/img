@@ -5,8 +5,27 @@
 ## 原理
 
 ```
-手机/电脑浏览器 ── Wi-Fi ──→ Node 服务（这台电脑）──→ Claude Agent SDK ──→ Claude Code CLI（订阅登录）
+手机/电脑浏览器 ── Wi-Fi ──→ Node 服务（这台电脑）──→ claude -p + stream-json 常驻管道（订阅登录）
 ```
+
+主聊天引擎（2026-07-18 起）直接 spawn 系统里的 claude.exe 跑 `-p` 双向 stream-json 常驻管道，不再经过 Agent SDK；系统提示词用人设**整个替换**（官方几万字工程规范不再注入）。问候语/翻译/记忆提取等后台一次性小活仍走 SDK。
+
+### 升级 Claude Code 前必跑的冒烟
+
+思考直播用的 `--thinking-display` 是无文档的隐藏 flag，升级 claude 后先验：
+
+```
+node scripts\smoke-pipe.mjs
+```
+
+全绿再继续用；有红项就先别升级（或回退版本）。
+
+### 掉登录问题
+
+裸 `-p` 非交互调用不执行订阅登录续期，令牌约 8 小时过期——表现为麦穗突然不回话。两个办法：
+
+1. **推荐**：终端跑一次 `claude setup-token`（浏览器授权，令牌一年有效），把 token 填进 `.env` 的 `CLAUDE_CODE_OAUTH_TOKEN`；
+2. 不弄令牌的话服务自带登录心跳（默认每 6 小时验一次，掉了 Bark 推送提醒你跑 `claude login`）。
 
 ## 从零开始（Windows）
 

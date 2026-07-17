@@ -54,6 +54,11 @@ export class SessionStore {
     fs.mkdirSync(this.dir, { recursive: true });
   }
 
+  /** 会话文件所在目录；外置 history MCP 进程从这里直读 JSON 文件 */
+  get sessionsDir(): string {
+    return this.dir;
+  }
+
   private file(id: string): string {
     // id 只允许 uuid 格式，防止路径穿越
     if (!/^[0-9a-f-]{36}$/.test(id)) throw new Error("bad session id");

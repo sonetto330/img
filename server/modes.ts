@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import type { Options } from "@anthropic-ai/claude-agent-sdk";
+import type { McpServers } from "./engine.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const root = path.join(here, "..");
@@ -10,9 +10,9 @@ const PROMPTS_DIR = path.join(root, "prompts");
 /** 工具向前端推送的事件；type 是事件名，其他字段随便附加 */
 export type ToolEvent = { type: string; [key: string]: unknown };
 
-/** 模式给外部提供的工具装备：MCP 服务端 + 允许模型调用的工具白名单 */
+/** 模式给外部提供的工具装备：外置 MCP 服务 + 允许模型调用的工具白名单 */
 export interface ModeTools {
-  mcpServers?: Options["mcpServers"];
+  mcpServers?: McpServers;
   allowedTools?: string[];
 }
 

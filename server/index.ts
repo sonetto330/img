@@ -8,12 +8,14 @@ import type { Options } from "@anthropic-ai/claude-agent-sdk";
 import { randomUUID } from "node:crypto";
 import { SessionStore, type Attachment, type SessionRecord } from "./sessions.js";
 import { runTurn, PersistentSession, type TurnHandle, type TurnUsage } from "./engine.js";
+import { attachmentPayload, isFirstOutputTimedOut, isTurnStalled } from "./lifecycle.js";
 import { burnAttachments } from "./burn.js";
 import { splitApiError, apiErrorNote } from "./apierror.js";
 import { getMode, loadModePrompt, type ToolEvent } from "./modes.js";
 import { maybeRunGptTurn, unseenGptLines } from "./group.js";
 import { buildHistoryTools } from "./history.js";
 import { barkPush } from "./bark.js";
+import { startLoginHeartbeat } from "./heartbeat.js";
 import { synthesize, ttsEnabled } from "./tts.js";
 import { transcribe, sttEnabled } from "./stt.js";
 import { getWeather } from "./weather.js";
@@ -26,15 +28,23 @@ import { getGreeting } from "./greeting.js";
 import { translateThinking } from "./translate.js";
 import { getSettings, setChannel, setExternal, publicSettings, channelEnv, externalConfigured, useApiNow, looksLikeLimitError, modelForChannel, type Channel } from "./settings.js";
 import { listExternalModels, SUBSCRIPTION_MODELS } from "./models.js";
+import { isLoopbackAddress, proxyExternalAnthropic } from "./external-proxy.js";
+import { acquireOrRenewDrain, computeRestartReady, currentDrain, isDraining } from "./supervisor-state.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const root = path.join(here, "..");
 
 const PORT = Number(process.env.PORT || 3000);
+const EXTERNAL_PROXY_PREFIX = "/_external_anthropic";
+// 只影响本服务拉起的 Claude 子进程；设置里没填自定义 base URL 时 channelEnv 不会使用它。
+process.env.EXTERNAL_API_PROXY_URL = `http://127.0.0.1:${PORT}${EXTERNAL_PROXY_PREFIX}`;
 const TOKEN = process.env.ACCESS_TOKEN || "";
 const WORKSPACE = path.resolve(process.env.WORKSPACE_DIR || path.join(root, "workspace"));
 const PERMISSION_MODE = (process.env.PERMISSION_MODE || "bypassPermissions") as Options["permissionMode"];
 const DATA_DIR = path.join(root, "data");
+// 流式回复的落盘检查点：服务死在半路（硬杀/崩溃）时，半截回复只活在内存里会整段丢；
+// 每 3 秒把流到的正文存进这里，重启时转成带半截标记的正式消息
+const CHECKPOINT_DIR = path.join(DATA_DIR, "runtime", "checkpoints");
 // 单次上下文（累计输入÷步数）超过这个 token 数就自动给会话瘦身（/compact）；0 = 关自动挡
 const COMPACT_THRESHOLD = Number(process.env.COMPACT_THRESHOLD_TOKENS || 150000);
 
@@ -53,6 +63,9 @@ const IMAGE_EXT = new Set([".png", ".jpg", ".jpeg", ".gif", ".webp"]);
 const store = new SessionStore(DATA_DIR);
 // chat 端老记录的只读存档（scripts/import-chat-archive.mjs 灌入），只喂给翻历史工具，不进会话列表
 const archiveStore = new SessionStore(path.join(DATA_DIR, "archive"));
+// 启动即恢复上代进程猝死留下的半截回复（此时还没 listen，没有并发轮次）
+fs.mkdirSync(CHECKPOINT_DIR, { recursive: true });
+recoverCheckpoints();
 const publicDir = path.join(root, "public");
 
 const MIME: Record<string, string> = {
@@ -148,25 +161,151 @@ interface ActiveTurn {
   lastProgressAt: string;
   partialText: string;
   partialThinking: string;
+  /** 累计思考毫秒（thinking_done 事件累加）；掐断落盘时给思考块一个真实时长 */
+  thinkingMs: number;
+  /** 本轮已跑过的工具；正文零字被掐断时靠它证明这轮干过活 */
+  toolsSeen: Array<{ name: string; detail?: string }>;
   /** 引擎真的启动过才有转录污染风险；检索记忆阶段被打断不用作废凭证 */
   engineStarted?: boolean;
+  /** 真正把本轮推给引擎的时间；首输出止损不把记忆检索时间算进去 */
+  engineStartedAt?: string;
+  /** 已收到过思考、文字或工具事件后，首输出止损永久退出 */
+  hasModelProgress?: boolean;
+  /** 流式检查点上次落盘时刻（ms）；3 秒节流，防进程猝死丢半截回复 */
+  lastCheckpointAt?: number;
   heartbeatTimer: NodeJS.Timeout;
 }
 
 // 轮属于会话，不属于某条 WS。出口可以随 attach 改指，轮本身一直跑到明确结束或打断。
 const activeTurns = new Map<string, ActiveTurn>();
 const silentSend = () => {};
+const configuredTurnStallSeconds = Number(process.env.TURN_STALL_SECONDS || 180);
+const TURN_STALL_SECONDS = Number.isFinite(configuredTurnStallSeconds) && configuredTurnStallSeconds >= 30
+  ? configuredTurnStallSeconds
+  : 180;
+const TURN_STALL_MS = TURN_STALL_SECONDS * 1000;
+const configuredFirstOutputSeconds = Number(process.env.FIRST_OUTPUT_TIMEOUT_SECONDS || 45);
+const FIRST_OUTPUT_TIMEOUT_SECONDS = Number.isFinite(configuredFirstOutputSeconds) && configuredFirstOutputSeconds >= 15
+  ? configuredFirstOutputSeconds
+  : 45;
+const FIRST_OUTPUT_TIMEOUT_MS = FIRST_OUTPUT_TIMEOUT_SECONDS * 1000;
+
+// Supervisor 一期（supervisor-design.md）：拉起时经环境变量下发的一次性身份与重启单号，
+// 健康端点回显供认领与幂等核对。手动 start.bat 起的服务两者皆 null——Supervisor 只监控不认领。
+const SERVICE_STARTED_AT = new Date().toISOString();
+const INSTANCE_NONCE = process.env.INSTANCE_NONCE || null;
+const RESTART_REQUEST_ID = process.env.RESTART_REQUEST_ID || null;
+
+// ---- 流式检查点：防"服务死在半路，半截回复整段丢" ----
+// 正常掐断走 persistIncompleteTurn 落盘没问题；但硬杀（Supervisor 换代、watchdog 拉起、
+// 崩溃）时 partialText 只在内存里。流正文时每 3 秒把半截存进 checkpoint 文件，
+// 轮子善终就删；新代启动时把遗留的转成带半截标记的正式消息。
+const CHECKPOINT_INTERVAL_MS = 3000;
+
+function checkpointFile(id: string): string {
+  return path.join(CHECKPOINT_DIR, `${id}.json`);
+}
+
+function maybeCheckpoint(turn: ActiveTurn): void {
+  const now = Date.now();
+  if (turn.lastCheckpointAt && now - turn.lastCheckpointAt < CHECKPOINT_INTERVAL_MS) return;
+  // 思考也是泽亲眼看着流出来的东西，跟正文同等待遇；工具轮常常正文零字、思考一大段
+  if (!turn.partialText.trim() && !turn.partialThinking.trim() && turn.toolsSeen.length === 0) return;
+  turn.lastCheckpointAt = now;
+  const file = checkpointFile(turn.record.id);
+  try {
+    // tmp+rename 原子写，半写的坏文件不会被下代当真
+    fs.writeFileSync(`${file}.tmp`, JSON.stringify({
+      sessionId: turn.record.id,
+      speaker: turn.speaker,
+      text: turn.partialText,
+      thinking: turn.partialThinking,
+      thinkingMs: turn.thinkingMs,
+      tools: turn.toolsSeen,
+      at: new Date().toISOString(),
+    }));
+    fs.renameSync(`${file}.tmp`, file);
+  } catch {
+    // 检查点写不进去不能拖累正常聊天
+  }
+}
+
+function clearCheckpoint(id: string): void {
+  try { fs.unlinkSync(checkpointFile(id)); } catch {}
+  try { fs.unlinkSync(`${checkpointFile(id)}.tmp`); } catch {}
+}
+
+/** 启动时跑一次：上代进程猝死留下的半截回复 → 转正式消息（带半截标记）。处理完全部清场。 */
+function recoverCheckpoints(): void {
+  let files: string[];
+  try {
+    files = fs.readdirSync(CHECKPOINT_DIR);
+  } catch {
+    return;
+  }
+  for (const f of files) {
+    const full = path.join(CHECKPOINT_DIR, f);
+    if (f.endsWith(".json")) {
+      try {
+        const cp = JSON.parse(fs.readFileSync(full, "utf8")) as {
+          sessionId?: string; speaker?: string; text?: string; thinking?: string; thinkingMs?: number;
+          tools?: { name: string; detail?: string }[]; at?: string;
+        };
+        const text = (cp.text || "").trim();
+        const thinking = (cp.thinking || "").trim();
+        const tools = Array.isArray(cp.tools) ? cp.tools.filter((t) => t && typeof t.name === "string") : [];
+        const record = cp.sessionId ? store.get(cp.sessionId) : null;
+        if (record && (text || thinking || tools.length)) {
+          // 同 persistIncompleteTurn：半截进了转录就作废 resume 凭证，防下轮分叉
+          if (cp.speaker === "gpt") {
+            delete record.codexThreadId;
+            record.codexSeenCount = 0;
+          } else {
+            delete record.claudeSessionId;
+          }
+          record.messages.push({
+            id: randomUUID(),
+            role: "assistant",
+            speaker: cp.speaker === "gpt" ? "gpt" : undefined,
+            text,
+            thinking: thinking ? { text: thinking, ms: cp.thinkingMs || 0 } : undefined,
+            tools: tools.length ? tools : undefined,
+            interrupted: true,
+            incompleteReason: "error",
+            at: cp.at || new Date().toISOString(),
+          });
+          store.save(record);
+          console.error(`[checkpoint] 恢复上代没说完的半截回复：${cp.sessionId!.slice(0, 8)}（正文 ${text.length} 字 · 思考 ${thinking.length} 字 · 工具 ${tools.length} 个）`);
+        }
+      } catch {
+        // 坏文件救不了，照删
+      }
+    }
+    try { fs.unlinkSync(full); } catch {}
+  }
+}
 
 function sendTurnEvent(turn: ActiveTurn, payload: Record<string, unknown>): void {
   const type = payload.type;
   if (type === "delta" && typeof payload.text === "string") {
     turn.partialText += payload.text;
+    turn.hasModelProgress = true;
     progressTurn(turn, "waiting_model");
+    maybeCheckpoint(turn);
   } else if (type === "thinking" && typeof payload.text === "string") {
     turn.partialThinking += payload.text;
+    turn.hasModelProgress = true;
     progressTurn(turn, "waiting_model");
+    maybeCheckpoint(turn);
+  } else if (type === "thinking_done" && typeof payload.ms === "number") {
+    turn.thinkingMs += payload.ms;
   } else if (type === "tool") {
+    turn.hasModelProgress = true;
+    if (typeof payload.name === "string") {
+      turn.toolsSeen.push({ name: payload.name, detail: typeof payload.detail === "string" ? payload.detail : undefined });
+    }
     progressTurn(turn, "running_tool", typeof payload.name === "string" ? payload.name : undefined);
+    maybeCheckpoint(turn);
   }
   turn.outRef.send({ ...payload, sessionId: turn.record.id });
 }
@@ -195,7 +334,7 @@ function progressTurn(turn: ActiveTurn, status: ActiveState, toolName?: string):
 
 function startActiveTurn(record: SessionRecord, send: (payload: unknown) => void, speaker?: "gpt"): ActiveTurn {
   const now = new Date().toISOString();
-  const turn = {
+  const turn: ActiveTurn = {
     record,
     handle: { interrupt: async () => {} },
     outRef: { send },
@@ -205,10 +344,28 @@ function startActiveTurn(record: SessionRecord, send: (payload: unknown) => void
     lastProgressAt: now,
     partialText: "",
     partialThinking: "",
+    thinkingMs: 0,
+    toolsSeen: [],
     heartbeatTimer: undefined as unknown as NodeJS.Timeout,
   };
   turn.heartbeatTimer = setInterval(() => {
     if (activeTurns.get(record.id) !== turn) return clearInterval(turn.heartbeatTimer);
+    if (
+      !turn.speaker
+      && isFirstOutputTimedOut(turn.engineStartedAt, Boolean(turn.hasModelProgress), Date.now(), FIRST_OUTPUT_TIMEOUT_MS)
+    ) {
+      console.error(`[turn] ${record.id.slice(0, 8)} 引擎启动后 ${FIRST_OUTPUT_TIMEOUT_SECONDS} 秒没有首个输出，自动停止`);
+      interruptActiveTurn(
+        turn,
+        `模型通道 ${FIRST_OUTPUT_TIMEOUT_SECONDS} 秒没有返回任何内容，可能正在拥堵；这一轮已自动停止，请重试`,
+      );
+      return;
+    }
+    if (isTurnStalled(turn.lastProgressAt, Date.now(), TURN_STALL_MS)) {
+      console.error(`[turn] ${record.id.slice(0, 8)} 超过 ${TURN_STALL_SECONDS} 秒没有进展，自动停止`);
+      interruptActiveTurn(turn, `超过 ${TURN_STALL_SECONDS} 秒没有新进展，已自动停止，请重试`);
+      return;
+    }
     turn.outRef.send({
       type: "heartbeat",
       sessionId: record.id,
@@ -226,16 +383,34 @@ function resetActiveTurn(turn: ActiveTurn): void {
   if (activeTurns.get(turn.record.id) !== turn) return;
   turn.partialText = "";
   turn.partialThinking = "";
+  turn.thinkingMs = 0;
+  turn.toolsSeen = [];
+  // 换通道重试要重流，废弃尝试的检查点跟着清，别让它死后被当遗言恢复
+  clearCheckpoint(turn.record.id);
+  delete turn.lastCheckpointAt;
   turn.status = "waiting_model";
+  turn.engineStarted = false;
+  delete turn.engineStartedAt;
+  turn.hasModelProgress = false;
   delete turn.toolName;
   turn.lastProgressAt = new Date().toISOString();
   sendTurnStatus(turn, true);
+}
+
+function markEngineStarted(turn: ActiveTurn): void {
+  if (activeTurns.get(turn.record.id) !== turn) return;
+  const now = new Date().toISOString();
+  turn.engineStarted = true;
+  turn.engineStartedAt = now;
+  turn.hasModelProgress = false;
+  turn.lastProgressAt = now;
 }
 
 function finishActiveTurn(turn: ActiveTurn): void {
   if (activeTurns.get(turn.record.id) !== turn) return;
   clearInterval(turn.heartbeatTimer);
   activeTurns.delete(turn.record.id);
+  clearCheckpoint(turn.record.id);
   turn.outRef.send({ type: "status", sessionId: turn.record.id, state: "idle", speaker: turn.speaker });
   turn.outRef.send = silentSend;
 }
@@ -252,12 +427,17 @@ function invalidateInterruptedResume(turn: ActiveTurn): void {
 
 function persistIncompleteTurn(turn: ActiveTurn, reason: "interrupted" | "error"): boolean {
   const text = turn.partialText.trim();
-  if (!text) return false;
+  const thinking = turn.partialThinking.trim();
+  // 正文零字但思考/工具跑过的轮（工具卡死、上游超时最常见的死相）也要留痕，
+  // 不然泽亲眼看着流了半天的东西刷新后整轮蒸发
+  if (!text && !thinking && turn.toolsSeen.length === 0) return false;
   turn.record.messages.push({
     id: randomUUID(),
     role: "assistant",
     speaker: turn.speaker,
     text,
+    thinking: thinking ? { text: thinking, ms: turn.thinkingMs } : undefined,
+    tools: turn.toolsSeen.length ? [...turn.toolsSeen] : undefined,
     interrupted: true,
     incompleteReason: reason,
     at: new Date().toISOString(),
@@ -266,19 +446,29 @@ function persistIncompleteTurn(turn: ActiveTurn, reason: "interrupted" | "error"
   return true;
 }
 
-function interruptActiveTurn(turn: ActiveTurn): void {
+function interruptActiveTurn(turn: ActiveTurn, errorMessage?: string): void {
   if (activeTurns.get(turn.record.id) !== turn) return;
   const handle = turn.handle;
   const persisted = persistIncompleteTurn(turn, "interrupted");
   // 引擎没启动就被打断（还在检索记忆），转录没动过，凭证留着照常 resume
   if (!persisted && turn.engineStarted) invalidateInterruptedResume(turn);
-  sendTurnEvent(turn, {
-    type: "done",
-    speaker: turn.speaker,
-    text: turn.partialText.trim(),
-    interrupted: persisted,
-    incompleteReason: "interrupted",
-  });
+  if (errorMessage) {
+    sendTurnEvent(turn, {
+      type: "error",
+      speaker: turn.speaker,
+      message: errorMessage,
+      interrupted: persisted,
+      incompleteReason: "interrupted",
+    });
+  } else {
+    sendTurnEvent(turn, {
+      type: "done",
+      speaker: turn.speaker,
+      text: turn.partialText.trim(),
+      interrupted: persisted,
+      incompleteReason: "interrupted",
+    });
+  }
   finishActiveTurn(turn);
   void handle.interrupt().catch(() => {}).finally(() => {
     if (!turn.speaker) void dropPooled(turn.record.id);
@@ -326,9 +516,18 @@ async function dropPooled(id: string): Promise<void> {
 
 /** 通道或外部 API 配置一变就全清：进程的环境变量是启动时定死的，旧进程还挂着旧通道 */
 function clearPool(reason: string): void {
-  if (!pool.size) return;
-  console.log(`[pool] ${reason}，清空 ${pool.size} 个常驻进程，下次消息按新配置冷启动`);
-  for (const id of [...pool.keys()]) void dropPooled(id);
+  const activeClaudeTurns = [...activeTurns.values()].filter((turn) => !turn.speaker);
+  const pooledIds = [...pool.keys()];
+  if (!pooledIds.length && !activeClaudeTurns.length) return;
+  console.log(
+    `[pool] ${reason}，停止 ${activeClaudeTurns.length} 个活动轮次、清空 ${pooledIds.length} 个常驻进程`
+  );
+  // 先摘掉活动轮并明确通知页面，再关进程。即使切通道发生在 pool.set 之前，
+  // 异步 launch 回来时也会看到 activeTurns 已失效，不会复活旧通道。
+  for (const turn of activeClaudeTurns) {
+    interruptActiveTurn(turn, `${reason}，这一轮已停止，请重新发送`);
+  }
+  for (const id of pooledIds) void dropPooled(id);
 }
 
 /**
@@ -428,6 +627,85 @@ function maybeAutoCompact(record: SessionRecord, usage: TurnUsage | undefined, s
 
 const server = http.createServer((req, res) => {
   const url = new URL(req.url || "/", `http://${req.headers.host}`);
+
+  // Claude CLI 专用的本机兼容代理：外部中转偶尔漏掉 Brotli 响应头，CLI 会把压缩字节当 JSON。
+  if (url.pathname === EXTERNAL_PROXY_PREFIX || url.pathname.startsWith(`${EXTERNAL_PROXY_PREFIX}/`)) {
+    if (!isLoopbackAddress(req.socket.remoteAddress)) return sendJson(res, 403, { error: "只允许本机调用" });
+    void proxyExternalAnthropic(req, res, `${url.pathname.slice(EXTERNAL_PROXY_PREFIX.length)}${url.search}`);
+    return;
+  }
+
+  // Supervisor 专线（本机 only，supervisor-design.md 一期）：健康状态 + drain 租约
+  if (url.pathname === "/api/supervisor/status") {
+    if (!isLoopbackAddress(req.socket.remoteAddress)) return sendJson(res, 403, { error: "只允许本机调用" });
+    const now = Date.now();
+    const drainState = currentDrain(now);
+    const turns = [...activeTurns.values()].map((turn) => ({
+      sessionId: turn.record.id.slice(0, 8),
+      speaker: turn.speaker || "claude",
+      state: turn.status,
+      startedAt: turn.startedAt,
+      lastProgressAt: turn.lastProgressAt,
+    }));
+    let wsClients = 0;
+    let wsBufferedBytes = 0;
+    for (const client of wss.clients) {
+      wsClients += 1;
+      wsBufferedBytes += client.bufferedAmount;
+    }
+    // store.save 是同步 writeFileSync：消息推进内存的同一个栈里就已落盘，没有待写队列。
+    // 字段按设计单保留，将来落盘改异步时在这里填真数。
+    const pendingWrites = 0;
+    return sendJson(res, 200, {
+      pid: process.pid,
+      instanceNonce: INSTANCE_NONCE,
+      restartRequestId: RESTART_REQUEST_ID,
+      startedAt: SERVICE_STARTED_AT,
+      activeTurns: activeTurns.size,
+      turns,
+      oldestProgressAt: turns.length ? turns.map((t) => t.lastProgressAt).sort()[0] : null,
+      wsClients,
+      pendingWrites,
+      wsBufferedBytes,
+      draining: Boolean(drainState),
+      drainRequestId: drainState?.requestId ?? null,
+      drainExpiresAt: drainState ? new Date(drainState.expiresAt).toISOString() : null,
+      restartReady: computeRestartReady({
+        draining: Boolean(drainState),
+        activeTurns: activeTurns.size,
+        pendingWrites,
+        wsBufferedBytes,
+      }),
+    });
+  }
+
+  if (url.pathname === "/api/supervisor/drain" && req.method === "POST") {
+    if (!isLoopbackAddress(req.socket.remoteAddress)) return sendJson(res, 403, { error: "只允许本机调用" });
+    const chunks: Buffer[] = [];
+    req.on("data", (c: Buffer) => chunks.push(c));
+    req.on("end", () => {
+      let body: { requestId?: unknown; nonce?: unknown; leaseSeconds?: unknown };
+      try {
+        body = JSON.parse(Buffer.concat(chunks).toString("utf8") || "{}");
+      } catch {
+        return sendJson(res, 400, { error: "消息格式不对" });
+      }
+      // nonce 是认领凭证：Supervisor 只能 drain 自己拉起的这一代。手动起的服务没有 nonce，
+      // 按设计单"只监控不认领"，重启请求转泽人工。
+      if (!INSTANCE_NONCE) return sendJson(res, 409, { error: "本服务不是 Supervisor 拉起的，只可监控不可重启" });
+      if (body.nonce !== INSTANCE_NONCE) return sendJson(res, 403, { error: "nonce 不符，别拿旧代的计划管新代" });
+      if (typeof body.requestId !== "string" || !body.requestId) return sendJson(res, 400, { error: "缺 requestId" });
+      const lease = typeof body.leaseSeconds === "number" ? body.leaseSeconds : undefined;
+      const result = acquireOrRenewDrain(body.requestId, lease, Date.now());
+      if (!result.ok) return sendJson(res, 409, { error: "锁被别的重启单持有", heldBy: result.heldBy });
+      return sendJson(res, 200, {
+        ok: true,
+        drainRequestId: result.state.requestId,
+        drainExpiresAt: new Date(result.state.expiresAt).toISOString(),
+      });
+    });
+    return;
+  }
 
   // 上传文件（需要口令）
   if (url.pathname === "/api/upload" && req.method === "POST") {
@@ -600,6 +878,7 @@ const server = http.createServer((req, res) => {
 
         const userText = await transcribe(audio, mime);
         if (!userText) return sendJson(res, 200, { empty: true, hint: "没听清，再说一遍？" });
+        if (isDraining(Date.now())) return sendJson(res, 409, { error: "正在重启，稍等再说" });
 
         // 通话有自己的会话（mode=call），记录进历史，聊天页也能翻到
         const record = (url.searchParams.get("session") && store.get(url.searchParams.get("session")!)) || store.create("call");
@@ -954,20 +1233,13 @@ wss.on("connection", (ws: WebSocket, req) => {
       const entry = pool.get(id);
       if (entry) entry.emitRef.send = send;
       const turn = activeTurns.get(id);
-      if (!turn) return;
+      if (!turn) {
+        send(attachmentPayload(id));
+        return;
+      }
       // 改出口和取快照都在同一个同步栈里；其后才可能处理下一段 delta，不重不漏。
       turn.outRef.send = send;
-      send({
-        type: "turn_snapshot",
-        sessionId: id,
-        speaker: turn.speaker,
-        partialText: turn.partialText,
-        partialThinking: turn.partialThinking || undefined,
-        status: turn.status,
-        toolName: turn.toolName,
-        startedAt: turn.startedAt,
-        lastProgressAt: turn.lastProgressAt,
-      });
+      send(attachmentPayload(id, turn));
       return;
     }
 
@@ -982,6 +1254,7 @@ wss.on("connection", (ws: WebSocket, req) => {
       // 拍一拍如果没在已有会话里就新建一个，走默认 chat 模式
       const record = (msg.sessionId && store.get(msg.sessionId)) || store.create();
       if (activeTurns.has(record.id)) return send({ type: "error", message: "上一条还在跑，等等或者先打断" });
+      if (isDraining(Date.now())) return send({ type: "error", message: "正在重启，稍等重发" });
       if (compacting.has(record.id)) return send({ type: "error", message: "这个会话正在瘦身，等几秒再拍" });
       // 拍一拍不改标题；存历史用固定文本，前端识别后显示成居中小字
       record.messages.push({ id: randomUUID(), role: "user", text: "（拍了拍你）", at: new Date().toISOString() });
@@ -1067,6 +1340,7 @@ wss.on("connection", (ws: WebSocket, req) => {
             },
           },
         );
+        markEngineStarted(turn);
       };
       // 拍一拍走老的 resume 路：同会话有常驻进程时先收干净再拍，防止 fork 分叉
       void dropPooled(record.id).then(() => {
@@ -1097,6 +1371,8 @@ wss.on("connection", (ws: WebSocket, req) => {
     // 已有会话不改 mode；只有新建时才认 msg.mode，未指定就默认 chat
     const record = (msg.sessionId && store.get(msg.sessionId)) || store.create(msg.mode || "chat");
     if (activeTurns.has(record.id)) return send({ type: "error", message: "上一条还在跑，等等或者先打断" });
+    // draining 只拦泽发起的新轮；群聊级联的 GPT 轮不拦，让正跑的一批对话完整落地再重启
+    if (isDraining(Date.now())) return send({ type: "error", message: "正在重启，稍等重发" });
     if (compacting.has(record.id)) return send({ type: "error", message: "这个会话正在瘦身，等几秒再发" });
     if (record.messages.length === 0) {
       record.title = (text || attachments[0]?.name || "新会话").slice(0, 24);
@@ -1278,7 +1554,7 @@ wss.on("connection", (ws: WebSocket, req) => {
                   setActive: (h) => {
                     if (h) {
                       gptTurn.handle = h;
-                      gptTurn.engineStarted = true;
+                      markEngineStarted(gptTurn);
                     } else finishActiveTurn(gptTurn);
                   },
                   isActive: () => activeTurns.get(record.id) === gptTurn,
@@ -1306,6 +1582,7 @@ wss.on("connection", (ws: WebSocket, req) => {
             },
           },
         );
+        markEngineStarted(turn);
       };
       await launch(useApiNow(), false);
       // 这轮已经推进常驻流，注入成功——把 read_count 打一记；即便本轮失败，"翻过牌"这件事也算数
@@ -1324,4 +1601,5 @@ server.listen(PORT, "0.0.0.0", () => {
   console.log(`「家」开门了：http://localhost:${PORT}`);
   console.log(`手机在同一 Wi-Fi 下访问 http://<电脑IP>:${PORT}（IP 用 ipconfig 查）`);
   console.log(`工作目录：${WORKSPACE}`);
+  startLoginHeartbeat();
 });
