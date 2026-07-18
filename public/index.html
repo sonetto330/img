@@ -3,6 +3,14 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
+  <!-- Safari 标签页里状态栏区域染成纸色，跟页面融为一体 -->
+  <meta name="theme-color" content="#f9f6f0" />
+  <!-- 添加到主屏幕后以独立 app 打开：页面铺满全屏、内容延伸到状态栏底下 -->
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="家" />
+  <link rel="manifest" href="manifest.json" />
   <title>家</title>
   <link rel="stylesheet" href="style.css" />
 </head>
@@ -135,10 +143,6 @@
         </div>
       </header>
 
-      <div id="turnStatus" class="status-strip st-model" hidden>
-        <i></i><span id="turnStatusText"></span><span id="turnStatusBeat" class="beat"></span>
-      </div>
-
       <div id="messages" class="messages"></div>
 
       <button id="toBottom" class="to-bottom" type="button" aria-label="回到底部" title="回到底部" hidden>
@@ -148,6 +152,9 @@
 
       <div class="composer-shell">
         <div class="cp-blur"><b></b><b></b><b></b></div>
+        <div id="turnStatus" class="status-strip st-model" hidden>
+          <i></i><span id="turnStatusText"></span><span id="turnStatusBeat" class="beat"></span>
+        </div>
         <div id="pendingBar" class="pending" hidden></div>
         <footer class="composer-capsule">
           <button id="attachBtn" class="attach" aria-label="加附件">＋</button>

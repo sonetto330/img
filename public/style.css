@@ -57,14 +57,25 @@ body {
 
 /* —— 顶栏 —— */
 .chat-header {
-  flex: none; display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
   padding: calc(10px + env(safe-area-inset-top)) max(12px, calc((100% - 700px) / 2)) 10px;
-  position: relative; z-index: 10;
+  /* 浮在消息滚动区上面：消息从抬头底下穿过，模糊场才有东西可糊 */
+  position: absolute; top: 0; left: 0; right: 0; z-index: 10;
 }
 .hd-blur {
-  position: absolute; left: 0; right: 0; top: 0; bottom: -24px;
+  /* 顶边上延盖过安全区：模糊层 mask 只羽化底部 20px，顶边是刀切的，
+     贴状态栏那条硬边推到屏幕物理顶端之外才不显 */
+  position: absolute; left: 0; right: 0;
+  top: calc(-1 * env(safe-area-inset-top) - 8px); bottom: -24px;
   z-index: -1; pointer-events: none;
-  background: linear-gradient(to bottom, rgba(249,246,240,.4), rgba(249,246,240,0) 55%);
+  /* 染色坡：官方 app 那种"越往上字越浅"——顶部实色托住状态栏黑字和标题，
+     往下逐级放透，跟五层 blur 阶梯叠成 糊+浅 的双坡；底端归零无硬边 */
+  background: linear-gradient(to bottom,
+    #f9f6f0 0%,
+    rgba(249,246,240,.92) 30%,
+    rgba(249,246,240,.7) 55%,
+    rgba(249,246,240,.32) 78%,
+    rgba(249,246,240,0) 100%);
 }
 .hd-blur b {
   position: absolute; left: 0; right: 0; top: 0; display: block;
@@ -144,7 +155,8 @@ body {
 /* —— 消息区 —— */
 .messages {
   flex: 1; overflow-y: auto; overflow-x: hidden;
-  padding: 18px max(22px, calc((100% - 700px) / 2)) 28px;
+  /* 上下留出悬浮抬头/输入区的高度；--composer-h 由 ResizeObserver 跟踪（含附件条、多行输入） */
+  padding: calc(70px + env(safe-area-inset-top)) max(22px, calc((100% - 700px) / 2)) calc(var(--composer-h, 78px) + 14px);
   display: flex; flex-direction: column; gap: 30px;
   font-family: var(--prose);
   overscroll-behavior-x: none;
@@ -195,7 +207,7 @@ body {
 .solo-mode .msg.ta {
   align-self: stretch; width: 100%; padding: 0 2px;
   background: none; border: 0; border-radius: 0;
-  font-size: 17px; line-height: 1.8;
+  font-size: 17px; line-height: 1.7;
 }
 .group-mode .msg.ta {
   max-width: 96%; padding: 13px 17px;
@@ -227,9 +239,10 @@ body {
 /* 气泡下方的常驻操作行，后续编辑、删除等按钮继续横向追加 */
 .msg-actions {
   align-self: stretch; min-height: 22px;
-  display: flex; align-items: center; gap: 6px; margin-top: 6px;
+  display: flex; align-items: center; gap: 6px; margin-top: 12px;
 }
-.solo-mode .msg-actions { margin-top: 18px; }
+/* 按钮自带 4px 内 padding，8px 出来视觉约 12px，跟思考/工具的节奏一致 */
+.solo-mode .msg-actions { margin-top: 8px; }
 .msg-block.me .msg-actions { justify-content: flex-end; }
 .copy-btn {
   width: 24px; height: 22px; padding: 4px;
@@ -349,7 +362,7 @@ body {
   display: flex; align-items: center; gap: 8px;
   font: inherit; font-size: 13.5px; color: var(--muted);
   background: none; border: none;
-  padding: 3px 2px; cursor: pointer;
+  padding: 6px 2px; cursor: pointer;
   touch-action: manipulation; letter-spacing: .5px;
 }
 .t-icon { display: inline-flex; color: var(--name); opacity: .8; }
@@ -358,9 +371,9 @@ body {
 .thinking-head.open::after { transform: rotate(90deg); }
 .thinking.live .t-icon { animation: pulse 1s infinite alternate; }
 .thinking-body {
-  margin: 4px 0 4px 5px;
+  margin: 6px 0 8px 5px;
   border-left: 2px solid var(--line);
-  padding: 2px 0 2px 12px;
+  padding: 3px 0 3px 12px;
   font-size: 12.5px; color: var(--muted); line-height: 1.7;
   white-space: pre-wrap; word-break: break-word;
   max-height: 260px; overflow-y: auto;
@@ -378,14 +391,14 @@ body {
 /* —— 工具：总头一行淡字，点开是带竖线的清单 —— */
 .steps {
   align-self: flex-start; max-width: 100%; width: 100%;
-  display: flex; flex-direction: column; gap: 2px;
+  display: flex; flex-direction: column; gap: 4px;
 }
 .steps-head {
   width: 100%; text-align: left;
   display: flex; align-items: center; gap: 8px;
   font: inherit; font-size: 13.5px; color: var(--muted);
   background: none; border: none;
-  padding: 3px 2px; cursor: pointer;
+  padding: 6px 2px; cursor: pointer;
   touch-action: manipulation; letter-spacing: .5px;
 }
 .steps-count { flex: none; color: var(--muted); }
@@ -395,8 +408,8 @@ body {
 .steps-head.open::after { transform: rotate(90deg); }
 .steps-head .step-brief { flex: 0 1 auto; }
 .steps-list {
-  display: flex; flex-direction: column; gap: 2px;
-  margin: 4px 0 4px 5px;
+  display: flex; flex-direction: column; gap: 4px;
+  margin: 6px 0 8px 5px;
   border-left: 2px solid var(--line);
   padding-left: 12px;
 }
@@ -428,6 +441,15 @@ body {
   max-height: 200px; overflow-y: auto;
 }
 .step-body[hidden] { display: none; }
+
+/* 群聊里气泡边框离工具/思考行只有 6px，行距节奏是 12px，给气泡让出同款间距 */
+.group-mode .thinking + .msg, .group-mode .steps + .msg { margin-top: 8px; }
+/* 名字→思考也收到 12px，跟单聊同节奏（speaker 自带 10px 下距 + 思考头 6px padding = 16，收 4） */
+.group-mode .speaker + .thinking, .group-mode .speaker + .steps { margin-top: -4px; }
+
+/* 单聊节奏统一 12px：思考/工具头自带 6px padding，名字→思考收窄、工具→正文垫高，都凑到 12px 视觉 */
+.solo-mode .speaker + .thinking, .solo-mode .speaker + .steps { margin-top: -10px; }
+.solo-mode .thinking + .msg, .solo-mode .steps + .msg { margin-top: 6px; }
 
 /* —— 正在忙 —— */
 .typing { align-self: flex-start; display: flex; gap: 4px; padding: 12px 14px; }
@@ -467,11 +489,14 @@ body {
 /* 施工状态只信服务端事件；时间只改文案，不拿来判断轮是否卡死。 */
 .status-strip[hidden] { display: none; }
 .status-strip {
+  /* 悬浮在输入胶囊上方，跟胶囊同款材质同款宽度 */
   flex: none; display: flex; align-items: center; gap: 9px;
-  min-height: 36px; padding: 0 max(22px, calc((100% - 700px) / 2));
-  background: rgba(249, 246, 240, .72);
-  backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
-  border: none; border-bottom: 1px solid rgba(93, 68, 42, .08);
+  width: min(100%, 640px); align-self: center;
+  min-height: 32px; padding: 0 16px; margin-bottom: 8px;
+  background: rgba(255, 253, 249, .72);
+  backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(210, 192, 165, .5); border-radius: 999px;
+  box-shadow: 0 2px 10px rgba(60, 40, 20, .05);
   font-size: 12.5px; color: var(--ink); font-family: var(--kai); letter-spacing: .5px;
 }
 .status-strip i { width: 7px; height: 7px; border-radius: 50%; flex: none; }
@@ -500,17 +525,18 @@ body {
 .edit-hint button:hover, .edit-hint button:focus-visible { color: var(--ink); }
 
 .composer-shell {
-  position: relative; z-index: 9; flex: none;
+  /* 悬浮在消息滚动区上面，胶囊外无实色底板 */
+  position: absolute; bottom: 0; left: 0; right: 0; z-index: 9;
   display: flex; flex-direction: column;
   padding: 10px 16px calc(14px + env(safe-area-inset-bottom));
 }
 .composer-shell::before {
-  content: ""; position: absolute; left: 0; right: 0; bottom: 0; top: -22px;
+  content: ""; position: absolute; left: 0; right: 0; bottom: 0; top: -8px;
   background: linear-gradient(to top, rgba(249,246,240,.85) 0%, rgba(249,246,240,.55) 55%, rgba(249,246,240,0) 100%);
   pointer-events: none; z-index: -1;
 }
 .cp-blur {
-  position: absolute; left: 0; right: 0; bottom: 0; top: -22px;
+  position: absolute; left: 0; right: 0; bottom: 0; top: -8px;
   z-index: -1; pointer-events: none;
 }
 .cp-blur b {
@@ -527,7 +553,9 @@ footer.composer-capsule {
   background: rgba(255,253,249,.72);
   backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
   border: 1px solid rgba(210,192,165,.5);
-  border-radius: 999px; padding: 4px 6px 4px 10px;
+  /* 固定圆角：单行时看着还是胶囊，多行长高后是圆角矩形——
+     999px 会让两端圆弧随高度变大，贴边的 ＋/发送键戳出弧外 */
+  border-radius: 24px; padding: 4px 6px 4px 10px;
   box-shadow: 0 2px 10px rgba(60,40,20,.05);
 }
 footer .attach {
@@ -558,7 +586,8 @@ footer textarea::placeholder { color: var(--muted); opacity: .75; }
 
 .to-bottom {
   position: fixed; left: 50%; transform: translateX(-50%);
-  bottom: calc(84px + env(safe-area-inset-bottom));
+  /* 锚在输入区上沿：输入区长高（多行/附件条）时跟着让位 */
+  bottom: calc(var(--composer-h, 78px) + 10px);
   width: 40px; height: 40px; border-radius: 50%; z-index: 10;
   background: rgba(255,253,249,.82);
   backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);

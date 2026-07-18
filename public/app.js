@@ -57,8 +57,9 @@ function setHeaderStatus(text) {
   statusTextEl.textContent = chatArea === "group" ? text : `${text} · ${selectedModelLabel()}`;
 }
 
-function setChatTitle(title) {
-  titleEl.textContent = title || (chatArea === "group" ? "议事厅" : "麦穗");
+function setChatTitle() {
+  /* 抬头恒定：单聊=麦穗、群聊=议事厅；会话名只出现在抽屉列表里 */
+  titleEl.textContent = chatArea === "group" ? "议事厅" : "麦穗";
 }
 
 function attachCurrentSession() {
@@ -251,6 +252,8 @@ function handle(msg) {
         renderMd(bubble, msg.text);
       }
       if (msg.interrupted && bubble) addHalfMark(bubble, msg.incompleteReason);
+      // 正文零字就被掐（只有思考/工具）：没气泡，标记挂到本轮的组上
+      else if (msg.interrupted && pendingAssistantGroup?.isConnected) addHalfMark(pendingAssistantGroup, msg.incompleteReason);
       if (bubble && msg.usage) addUsage(bubble, msg.usage);
       finishTurn();
       loadSessions();
@@ -285,6 +288,8 @@ function handle(msg) {
       // GPT 侧失败时麦穗的回复已经正常收完，只用收掉 GPT 的等待指示，别动他的气泡
       if (msg.speaker === "gpt") clearGptIndicator();
       if (msg.interrupted && liveBubble) addHalfMark(liveBubble, msg.incompleteReason || "error");
+      // 同 done：零正文的半截轮标记挂组上
+      else if (msg.interrupted && pendingAssistantGroup?.isConnected) addHalfMark(pendingAssistantGroup, msg.incompleteReason || "error");
       addBubble("error", msg.message);
       finishTurn();
       break;
@@ -1160,6 +1165,16 @@ function forceScrollDown() {
 
 toBottomEl.onclick = forceScrollDown;
 
+// 输入区悬浮后消息区靠 --composer-h 留底部空隙：附件条/多行输入让它长高时，
+// 空隙和回到底部钮都跟着走，原本贴底的话保持贴底。
+const composerShellEl = document.querySelector(".composer-shell");
+if (composerShellEl && "ResizeObserver" in window) {
+  new ResizeObserver(() => {
+    document.documentElement.style.setProperty("--composer-h", composerShellEl.offsetHeight + "px");
+    scrollDown();
+  }).observe(composerShellEl);
+}
+
 // 把回复渲染成排版好的样子（加粗、列表、代码块）
 function renderMd(el, text) {
   const raw = text ?? "";
@@ -1817,8 +1832,9 @@ function renderMessage(m) {
   if (m.at) maybeStamp(m.at);
   const isGpt = m.role === "assistant" && m.speaker === "gpt";
   // 他的回合开头放一行名字+时间（拍一拍的回应除外，那个本来就是小字）
+  let taGroup = null;
   if (m.role === "assistant" && (m.text || m.thinking?.text || m.tools?.length)) {
-    addTaHead(m.at, isGpt ? "GPT" : "麦穗");
+    taGroup = addTaHead(m.at, isGpt ? "GPT" : "麦穗");
   }
   if (m.thinking?.text) newThinkingCard(m.thinking);
   if (m.tools?.length) {
@@ -1848,6 +1864,8 @@ function renderMessage(m) {
       if (m.usage) addUsage(bubble, m.usage);
     }
   }
+  // 正文零字的半截轮（只跑了思考/工具就被掐）：没气泡可挂，标记挂在组上
+  if (m.interrupted && !m.text && taGroup) addHalfMark(taGroup, m.incompleteReason);
 }
 
 // 分段渲染：会话超长时先只上最近 50 条 DOM，其他留在内存里等按钮拉

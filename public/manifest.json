@@ -1,0 +1,8 @@
+{
+  "name": "家",
+  "short_name": "家",
+  "display": "standalone",
+  "start_url": "/",
+  "background_color": "#f9f6f0",
+  "theme_color": "#f9f6f0"
+}
