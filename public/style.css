@@ -1062,7 +1062,12 @@ footer textarea::placeholder { color: var(--muted); opacity: .75; }
 .memory-back {
   pointer-events: auto;
   border: none; background: none; color: rgba(242, 233, 216, 0.75);
-  font-size: 15px; padding: 6px 10px 6px 0; cursor: pointer;
+  font-size: 17px; cursor: pointer;
+  /* 热区撑到 44px 触摸标准；负 margin 抵掉撑高，不推挤下面的斜体句 */
+  min-width: 48px; min-height: 44px;
+  display: inline-flex; align-items: center;
+  padding: 0 14px 0 0;
+  margin: -9px 0;
 }
 .star-tagline {
   margin: 0;
