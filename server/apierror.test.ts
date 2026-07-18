@@ -33,6 +33,10 @@ check("聊到词组不误伤", talk.clean.includes("API Error: abc") && !talk.ap
 const indented = splitApiError("  API Error: 529 overloaded");
 check("行首缩进也认", indented.clean === "" && indented.apiError === "API Error: 529 overloaded");
 
+// 中转站漏标压缩头时 CLI 自己生成的解析错误，没有三位 HTTP 状态码，也得当错误处理
+const parse = splitApiError("API Error: Failed to parse JSON");
+check("JSON 解析失败也剥出", parse.clean === "" && parse.apiError === "API Error: Failed to parse JSON");
+
 // 人话版：402 提额度，其他提重试
 check("402 提额度", apiErrorNote("API Error: 402 usage limit").includes("额度"));
 check("非限额提重试", apiErrorNote("API Error: 400 bad request").includes("再发一次"));

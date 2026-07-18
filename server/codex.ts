@@ -88,6 +88,7 @@ function minimalConfig(): string[] {
   const pairs = [
     `model_instructions_file=${tomlString(INSTRUCTIONS_FILE)}`,
     `project_doc_max_bytes=0`,
+    `model_reasoning_effort="xhigh"`,
     `sandbox_mode="read-only"`,
     `tools.web_search=true`,
     `features.shell_tool=false`,
@@ -118,14 +119,16 @@ export function buildCodexArgs(opts: { prompt: string; threadId?: string; model?
     "--skip-git-repo-check",
     ...minimalConfig(),
     "--json",
-    ...(opts.images ?? []).flatMap((f) => ["-i", f]),
   ];
+  const imageArgs = (opts.images ?? []).flatMap((f) => ["-i", f]);
   if (opts.threadId) {
-    return ["exec", "resume", opts.threadId, opts.prompt, ...shared];
+    return ["exec", "resume", opts.threadId, opts.prompt, ...shared, ...imageArgs];
   }
   const args = ["exec", "-C", CODEX_WORKDIR, ...shared];
   if (opts.model) args.push("-m", opts.model);
-  args.push(opts.prompt);
+  // -i/--image 是 <FILE>... 贪婪多值参数；prompt 若放在最后会被吞成图片路径，
+  // CLI 随后误报 "No prompt provided via stdin"。prompt 必须排在第一个 -i 前。
+  args.push(opts.prompt, ...imageArgs);
   return args;
 }
 

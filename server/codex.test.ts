@@ -40,6 +40,7 @@ function configPairs(args: string[]): string[] {
   const pairs = configPairs(args);
   const wanted = [
     "project_doc_max_bytes=0",
+    'model_reasoning_effort="xhigh"',
     'sandbox_mode="read-only"',
     "features.shell_tool=false",
     "features.multi_agent=false",
@@ -92,7 +93,7 @@ function configPairs(args: string[]): string[] {
   const first = args.indexOf("-i");
   check("首轮：每张图一个 -i", first > 0 && args[first + 1] === "C:\\up\\a.jpg"
     && args[first + 2] === "-i" && args[first + 3] === "C:\\up\\b.png");
-  check("首轮：带图时 prompt 仍在末尾", args[args.length - 1] === "看图");
+  check("首轮：prompt 在贪婪图片参数之前", args.indexOf("看图") > 0 && args.indexOf("看图") < first);
 
   const tid = "019f646e-ae0d-73a0-817b-8e4151c0395e";
   const rargs = buildCodexArgs({ prompt: "再看", threadId: tid, images: ["C:\\up\\c.webp"] });

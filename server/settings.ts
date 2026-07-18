@@ -161,7 +161,11 @@ export function channelEnv(useApi: boolean): Record<string, string | undefined> 
   }
   // 中转站/自定义接入点
   const baseUrl = effectiveBaseUrl();
-  if (baseUrl) env.ANTHROPIC_BASE_URL = baseUrl;
+  if (baseUrl) {
+    // 麦田服务可选地在本机挂一层兼容代理，修复中转站的畸形压缩响应。
+    // 没从 server/index.ts 启动时仍旧直连，独立脚本不会被绑死在本地端口。
+    env.ANTHROPIC_BASE_URL = process.env.EXTERNAL_API_PROXY_URL || baseUrl;
+  }
   return env;
 }
 

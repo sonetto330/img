@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 import type { TurnHandle } from "./engine.js";
 import type { SessionRecord, SessionStore, StoredMessage } from "./sessions.js";
 import { codexAvailable, runCodexTurn } from "./codex.js";
+import { scheduleExtractionIfNeeded } from "./memory/scribe.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const root = path.join(here, "..");
@@ -13,6 +14,9 @@ const INTRO_FILE = path.join(root, "prompts", "group_gpt_intro.md");
 
 /** StoredMessage.speaker 里标记 GPT 的值 */
 export const GPT_SPEAKER = "gpt";
+/** Windows 单进程命令行上限约 32767 字符；给固定参数、图片路径和转义留足余量。 */
+export const GPT_PROMPT_MAX_CHARS = 20_000;
+const GPT_MESSAGE_MAX_CHARS = 3_000;
 
 function speakerName(m: StoredMessage): string {
   if (m.role === "user") return "泽";
@@ -21,6 +25,7 @@ function speakerName(m: StoredMessage): string {
 
 /** 上传目录：跟 index.ts 同一套算法，附件的 file 字段都落在这里 */
 const UPLOADS_DIR = path.join(path.resolve(process.env.WORKSPACE_DIR || path.join(root, "workspace")), "uploads");
+const GPT_REBUILD_MAX_IMAGES = 6;
 
 /** 把一条历史消息排成给 GPT 看的台词行；没内容（纯空消息）返回 null */
 function lineFor(m: StoredMessage): string | null {
@@ -34,6 +39,69 @@ function lineFor(m: StoredMessage): string | null {
   return body ? `${speakerName(m)}：${body}` : null;
 }
 
+function clipMessageLine(line: string): string {
+  if (line.length <= GPT_MESSAGE_MAX_CHARS) return line;
+  // 开头通常是行动过程，结尾通常是结论；两头都留，避免一条超长施工汇报吃光整批预算。
+  const tail = 700;
+  return `${line.slice(0, GPT_MESSAGE_MAX_CHARS - tail - 15)}\n…（本条过长，省略中段）…\n${line.slice(-tail)}`;
+}
+
+export interface BoundedGptPrompt {
+  prompt: string;
+  includedMessages: StoredMessage[];
+  omittedCount: number;
+}
+
+/**
+ * Codex 的 prompt 目前作为命令行参数传入。首次重建 thread 或积压很多轮时，
+ * 只重放最近上下文，并限制单条长度，防止 Windows 在 spawn 前因命令行过长直接失败。
+ */
+export function buildBoundedGptPrompt(
+  messages: StoredMessage[],
+  prefix = "",
+  maxChars = GPT_PROMPT_MAX_CHARS,
+): BoundedGptPrompt {
+  const entries = messages
+    .map((message) => {
+      const line = lineFor(message);
+      return line ? { message, line: clipMessageLine(line) } : null;
+    })
+    .filter((entry): entry is { message: StoredMessage; line: string } => entry !== null);
+
+  const noteReserve = 140;
+  const lineBudget = Math.max(500, maxChars - prefix.length - noteReserve);
+  const selected: typeof entries = [];
+  let used = 0;
+  let omittedCount = 0;
+  for (let i = entries.length - 1; i >= 0; i--) {
+    const entry = entries[i];
+    const cost = entry.line.length + (selected.length ? 2 : 0);
+    if (selected.length && used + cost > lineBudget) {
+      omittedCount = i + 1;
+      break;
+    }
+    // 极小测试预算下也保证最新一条能进，但仍裁到当前剩余容量。
+    if (!selected.length && cost > lineBudget) {
+      entry.line = entry.line.slice(0, lineBudget);
+    }
+    selected.unshift(entry);
+    used += Math.min(cost, lineBudget);
+  }
+
+  const note = omittedCount
+    ? `[上下文重建：较早的 ${omittedCount} 条消息因 Windows 命令行长度限制未重放；下面是最近对话。]`
+    : "";
+  const prompt = [prefix.trim(), note, selected.map((entry) => entry.line).join("\n\n")]
+    .filter(Boolean)
+    .join("\n\n")
+    .slice(0, maxChars);
+  return {
+    prompt,
+    includedMessages: selected.map((entry) => entry.message),
+    omittedCount,
+  };
+}
+
 /** 收集这批消息里真实存在的图片文件绝对路径（给 codex -i 用）；丢了的文件跳过别炸轮 */
 function imagePathsFor(messages: StoredMessage[]): string[] {
   const out: string[] = [];
@@ -44,7 +112,8 @@ function imagePathsFor(messages: StoredMessage[]): string[] {
       if (fs.existsSync(p)) out.push(p);
     }
   }
-  return out;
+  // thread 重建时历史里可能积了几十张图；只带最近一组，避免一次重传全部旧截图。
+  return out.slice(-GPT_REBUILD_MAX_IMAGES);
 }
 
 /** GPT 说"这轮我不说话"的暗号；开场白里约定的是 [沉默] */
@@ -99,11 +168,9 @@ export function maybeRunGptTurn(opts: GptTurnOpts): boolean {
 
   const upTo = record.messages.length;
   const freshMessages = record.messages.slice(record.codexSeenCount ?? 0, upTo);
-  const fresh = freshMessages.map(lineFor).filter((l): l is string => !!l);
-  if (!fresh.length) return false;
-  const images = imagePathsFor(freshMessages);
+  if (!freshMessages.some((message) => lineFor(message))) return false;
 
-  let prompt = fresh.join("\n\n");
+  let prefix = "";
   if (!record.codexThreadId) {
     // 首轮带开场白。缺文件就明确报错，绝不让 GPT 不明不白地进群
     let intro: string;
@@ -113,7 +180,15 @@ export function maybeRunGptTurn(opts: GptTurnOpts): boolean {
       send({ type: "error", speaker: GPT_SPEAKER, message: `GPT 开场白文件缺失（${INTRO_FILE}），这轮不叫它了` });
       return false;
     }
-    prompt = `${intro.trim()}\n\n[群里的对话]\n\n${prompt}`;
+    prefix = `${intro.trim()}\n\n[群里的对话]`;
+  }
+  const batch = buildBoundedGptPrompt(freshMessages, prefix);
+  const prompt = batch.prompt;
+  const images = imagePathsFor(batch.includedMessages);
+  if (batch.omittedCount) {
+    console.warn(
+      `[group] GPT 上下文过长：省略较早 ${batch.omittedCount} 条，只重放最近 ${batch.includedMessages.length} 条`
+    );
   }
 
   send({ type: "gpt_start" });
@@ -146,6 +221,8 @@ export function maybeRunGptTurn(opts: GptTurnOpts): boolean {
         record.messages.push({ role: "assistant", speaker: GPT_SPEAKER, text, at: new Date().toISOString() });
         record.codexSeenCount = upTo + 1; // 自己这条也算看过（thread 里有）
         store.save(record);
+        // GPT 的发言也进记忆；不 await、出错不影响主聊天
+        scheduleExtractionIfNeeded(record);
         send({ type: "done", speaker: GPT_SPEAKER, text });
         notifyIfAway("GPT", text);
         setActive(null);

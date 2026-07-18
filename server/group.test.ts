@@ -1,8 +1,8 @@
 /**
  * group.ts 纯逻辑测试：npx tsx server/group.test.ts
- * 只测 unseenGptLines（麦穗下轮 prompt 前置 GPT 发言的取数逻辑），不起子进程。
+ * 测 unseenGptLines + GPT 重建上下文的长度保护，不起子进程。
  */
-import { unseenGptLines } from "./group.js";
+import { buildBoundedGptPrompt, unseenGptLines } from "./group.js";
 import type { SessionRecord, StoredMessage } from "./sessions.js";
 
 let failed = 0;
@@ -54,6 +54,28 @@ const gpt = (text: string): StoredMessage => ({ role: "assistant", speaker: "gpt
 {
   check("首条消息时为空", unseenGptLines(rec([user("第一句")])) === "");
   check("空会话为空", unseenGptLines(rec([])) === "");
+}
+
+// GPT thread 被删后会从 seen=0 重建；长群聊不能把 Windows 32767 字符命令行撑爆
+{
+  const messages = Array.from({ length: 40 }, (_, i) =>
+    i % 2 ? mai(`麦穗-${i}-` + "长".repeat(1800)) : user(`泽-${i}-` + "话".repeat(1800))
+  );
+  const bounded = buildBoundedGptPrompt(messages, "群聊开场白", 8000);
+  check("长历史 prompt 不超过预算", bounded.prompt.length <= 8000, String(bounded.prompt.length));
+  check("长历史会省略较早消息", bounded.omittedCount > 0, String(bounded.omittedCount));
+  check("保留最新消息", bounded.prompt.includes("麦穗-39-"));
+  check("丢掉最早消息", !bounded.prompt.includes("泽-0-"));
+  check("图片/附件取数只对应实际纳入的消息", bounded.includedMessages.at(-1) === messages.at(-1));
+}
+
+// 单条极长也必须裁，且保留头尾
+{
+  const huge = user(`开头-${"中".repeat(6000)}-结尾`);
+  const bounded = buildBoundedGptPrompt([huge], "", 3500);
+  check("单条超长会裁剪", bounded.prompt.length <= 3500);
+  check("单条裁剪保留开头", bounded.prompt.includes("开头"));
+  check("单条裁剪保留结尾", bounded.prompt.includes("结尾"));
 }
 
 console.log(failed ? `\n${failed} 项没过` : "\n全过");

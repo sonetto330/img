@@ -12,6 +12,7 @@ const root = path.join(here, "..", "..");
 const MIN_NEW_MESSAGES = 10;               // 累计 ≥10 条新消息触发
 const MIN_INTERVAL_MS = 20 * 60_000;       // 距上次 ≥20 分钟兜底触发
 const MIN_MESSAGES_FOR_TIME = 2;           // 时间到但至少要有这么多条才跑
+const BATCH_MAX = 40;                      // 一次最多喂 haiku 这么多条，欠账多了分多轮追平
 
 const VALID_KINDS = new Set(["person", "place", "event", "hobby", "project"]);
 
@@ -23,17 +24,24 @@ interface Fragment {
 
 /**
  * 非阻塞：从 onDone 调用，别 await；出错不影响主聊天。
- * 只对 chat 模式的会话生效——跑团/旅行/技术讨论都不进记忆。
+ * chat 和 group 模式进记忆——跑团/旅行是虚构线，不进。
  */
 export function scheduleExtractionIfNeeded(record: SessionRecord): void {
-  if (record.mode !== "chat") return;
+  if (record.mode !== "chat" && record.mode !== "group") return;
+  // 分批追欠账时一轮可能要跑几分钟，期间别再叠一个并行提取（会重复入库）
+  if (inFlight.has(record.id)) return;
   if (!shouldExtract(record)) return;
   // 快照当前消息数：即便 record 后续继续追加消息，这次也只处理到这里
   const targetIndex = record.messages.length;
-  extractFor(record, targetIndex).catch((err) => {
-    console.error(`[scribe] ${record.id.slice(0, 8)} 失败：${err instanceof Error ? err.message : err}`);
-  });
+  inFlight.add(record.id);
+  extractFor(record, targetIndex)
+    .catch((err) => {
+      console.error(`[scribe] ${record.id.slice(0, 8)} 失败：${err instanceof Error ? err.message : err}`);
+    })
+    .finally(() => inFlight.delete(record.id));
 }
+
+const inFlight = new Set<string>();
 
 function shouldExtract(record: SessionRecord): boolean {
   const db = getDb();
@@ -54,7 +62,9 @@ async function extractFor(record: SessionRecord, targetIndex: number): Promise<v
     "SELECT last_message_index FROM extraction_state WHERE session_id = ?",
   ).get(record.id) as { last_message_index: number } | undefined;
   const fromIndex = state?.last_message_index ?? 0;
-  const newMessages = record.messages.slice(fromIndex, targetIndex);
+  // 欠账超过一批的量就先啃前 BATCH_MAX 条，指针推进后尾递归追下一批
+  const batchEnd = Math.min(targetIndex, fromIndex + BATCH_MAX);
+  const newMessages = record.messages.slice(fromIndex, batchEnd);
 
   const convo = newMessages
     .filter((m) => m.text?.trim() && m.text !== "（拍了拍你）")
@@ -62,7 +72,8 @@ async function extractFor(record: SessionRecord, targetIndex: number): Promise<v
     .join("\n\n");
   if (!convo.trim()) {
     // 这段全是拍一拍/空消息，直接推进指针别下轮再重跑
-    updateState(record.id, targetIndex);
+    updateState(record.id, batchEnd);
+    if (batchEnd < targetIndex) return extractFor(record, targetIndex);
     return;
   }
 
@@ -130,14 +141,12 @@ ${existingList}
   };
 
   const fragments = parseFragments(await withChannelFallback("scribe", run));
-  if (fragments.length === 0) {
-    updateState(record.id, targetIndex);
-    return;
+  if (fragments.length > 0) {
+    storeFragments(record.id, fragments);
+    console.log(`[scribe] ${record.id.slice(0, 8)}：入库 ${fragments.length} 条碎片（第 ${fromIndex}~${batchEnd} 条）`);
   }
-
-  storeFragments(record.id, fragments);
-  updateState(record.id, targetIndex);
-  console.log(`[scribe] ${record.id.slice(0, 8)}：入库 ${fragments.length} 条碎片`);
+  updateState(record.id, batchEnd);
+  if (batchEnd < targetIndex) return extractFor(record, targetIndex);
 }
 
 function storeFragments(sessionId: string, fragments: Fragment[]): void {
