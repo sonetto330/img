@@ -7,3 +7,4 @@ supervisor.log
 bobobei/venv/
 __pycache__/
 *.pyc
+spicy-monopoly/
