@@ -1,18 +1,20 @@
-// 记忆星图 — 布局与渲染
-// 布局思路参考 MemoryConstellations（MIT，Clara Shafiq & Draco Malfoy）js/memory/layout.js
-// 简化到只有一层视图：5 个 kind galaxy 环绕中间双星（泽 + 麦穗）
+// 记忆星图 — 3D 星空版（2026-07-18 重写）
+// 视觉参照：印刷星表美学 — 深纸色底、米金星点、细线星座、带环亮星、四角框线（框线在 HTML/CSS 层）
+// 技术路线：Canvas 2D 手写球面布局 + 透视投影。不引 Three.js —— 前端无构建步骤、
+//   CDN 不稳，而节点量（几十星 + 一两百桥）Canvas 全重绘毫无压力。别手贱引库。
+// 交互：单指拖动 = 旋转（yaw/pitch + 惯性），双指 = 缩放，点星 = 详情。空闲时缓慢自转。
 
 /* global memoryGraph */
 
-// 浅色底下的 kind 配色：饱和度略降，避免刺眼；每个色跟米黄底能拉开对比
 const KIND_META = {
-  person:  { label: "社交", color: "#d4954a", angleDeg: 270 }, // 正上，赭黄
-  place:   { label: "地点", color: "#5a94c2", angleDeg: 342 }, // 右上，湖蓝
-  event:   { label: "事件", color: "#c9673f", angleDeg:  54 }, // 右下，主色橙
-  hobby:   { label: "爱好", color: "#9068c0", angleDeg: 126 }, // 左下，紫
-  project: { label: "项目", color: "#5aa87a", angleDeg: 198 }, // 左上，青
+  person:  { label: "社交", dir: [ 0.00,  0.85,  0.30] },
+  place:   { label: "地点", dir: [ 0.85,  0.15, -0.40] },
+  event:   { label: "事件", dir: [ 0.35, -0.75,  0.45] },
+  hobby:   { label: "爱好", dir: [-0.75, -0.45, -0.35] },
+  project: { label: "项目", dir: [-0.60,  0.35,  0.60] },
 };
 const GOLDEN = Math.PI * (3 - Math.sqrt(5));
+const STAR_FONT = '"Didot", "KingHwa_OldSong", Georgia, serif';
 
 function hashStr(s) {
   let h = 0;
@@ -29,186 +31,378 @@ function seededRng(seed) {
     return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
   };
 }
+function norm3(v) {
+  const l = Math.hypot(v[0], v[1], v[2]) || 1;
+  return [v[0] / l, v[1] / l, v[2] / l];
+}
+function cross3(a, b) {
+  return [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
+}
 
-// 按 kind 分组，每组做种子化 sunflower spiral 摆位。同一实体每次刷新位置稳定。
-function buildLayout(W, H, entities) {
-  const cx = W / 2, cy = H / 2;
-  const orbit = Math.min(W, H) * 0.33;
-  const positions = new Map();
-  const galaxies = []; // 每个 kind 的星系中心，画方位标签用
+// —— 3D 布局：每个 kind 占球面一个方向，类内在球帽上做种子化 sunflower ——
+// 坐标是单位球归一化的，跟屏幕尺寸无关；投影时再乘半径。同一实体每次刷新位置稳定。
+function buildLayout3D(entities) {
+  const nodes = [];
+  const byId = new Map();
   const groups = {};
-  for (const e of entities) {
-    (groups[e.kind] || (groups[e.kind] = [])).push(e);
-  }
-  // 无论有没有实体，五个 kind 的方位都占位（标签总画）
-  for (const kind of Object.keys(KIND_META)) {
-    const meta = KIND_META[kind];
-    const ang = (meta.angleDeg * Math.PI) / 180;
-    const gx = cx + Math.cos(ang) * orbit * (W > H ? 1.25 : 0.9);
-    const gy = cy + Math.sin(ang) * orbit;
-    galaxies.push({ kind, gx, gy, meta });
+  for (const e of entities) (groups[e.kind] || (groups[e.kind] = [])).push(e);
 
+  for (const kind of Object.keys(KIND_META)) {
     const list = (groups[kind] || []).slice().sort(
       (a, b) => (b.fragmentCount || 0) - (a.fragmentCount || 0),
     );
     if (!list.length) continue;
-    const nebulaR = Math.min(W, H) * 0.17 + Math.sqrt(list.length + 1) * 6;
-    const r = seededRng(hashStr(kind));
+    const dir = norm3(KIND_META[kind].dir);
+    const ref = Math.abs(dir[1]) < 0.9 ? [0, 1, 0] : [1, 0, 0];
+    const u = norm3(cross3(dir, ref));
+    const v = cross3(dir, u);
+    const maxAng = 0.55 + Math.min(0.38, list.length * 0.014);
+    const rng = seededRng(hashStr(kind));
+
     for (let i = 0; i < list.length; i++) {
       const e = list[i];
-      const a = i * GOLDEN + r() * 0.4;
-      const dist = nebulaR * 0.78 * Math.sqrt((i + 0.5) / Math.max(list.length, 1));
-      const size = Math.min(9, 2.5 + Math.sqrt((e.fragmentCount || 0) + 1) * 1.8);
-      positions.set(e.id, {
+      const theta = maxAng * Math.sqrt((i + 0.5) / list.length);
+      const phi = i * GOLDEN + rng() * 0.6;
+      const st = Math.sin(theta), ct = Math.cos(theta);
+      const cp = Math.cos(phi), sp = Math.sin(phi);
+      const rr = 0.68 + rng() * 0.6; // 半径抖动 → 星域有厚度
+      const node = {
         entity: e,
-        x: gx + Math.cos(a) * dist,
-        y: gy + Math.sin(a) * dist,
-        r: size,
-        color: meta.color,
-      });
+        x: (dir[0] * ct + (u[0] * cp + v[0] * sp) * st) * rr,
+        y: -(dir[1] * ct + (u[1] * cp + v[1] * sp) * st) * rr, // 屏幕 y 向下，翻转
+        z: (dir[2] * ct + (u[2] * cp + v[2] * sp) * st) * rr,
+        r: Math.min(8, 2.2 + Math.sqrt((e.fragmentCount || 0) + 1) * 1.5),
+        ring: false,
+        labelRank: 0,
+      };
+      nodes.push(node);
+      byId.set(e.id, node);
     }
   }
-  return { cx, cy, positions, galaxies };
+
+  // 亮星戴环 + 标签显示优先级：全局按碎片数排
+  const ranked = nodes.slice().sort(
+    (a, b) => (b.entity.fragmentCount || 0) - (a.entity.fragmentCount || 0),
+  );
+  ranked.forEach((n, i) => {
+    n.labelRank = i;
+    if (i < 3) n.ring = true;
+  });
+  return { nodes, byId };
 }
 
-// 背景星尘（静态，按尺寸缓存）
-let _bgCache = null;
-function backgroundStars(W, H) {
-  if (_bgCache && _bgCache.W === W && _bgCache.H === H) return _bgCache.list;
+// —— 3D 星尘壳：比数据星更远的一层装饰光点，跟着一起转出厚度感，各有各的闪烁节奏 ——
+let _dustCache = null;
+function dustShell() {
+  if (_dustCache) return _dustCache;
+  const rng = seededRng(1224);
   const list = [];
-  const r = seededRng(42);
-  // 浅色底下"星尘"更像纸上的墨点，密度小一点、alpha 低一点，别喧宾夺主
-  const n = Math.max(80, Math.floor((W * H) / 3800));
-  for (let i = 0; i < n; i++) {
-    const bright = r() > 0.94;
+  for (let i = 0; i < 190; i++) {
+    const y = rng() * 2 - 1;
+    const a = rng() * Math.PI * 2;
+    const rxy = Math.sqrt(1 - y * y);
+    const rr = 1.25 + rng() * 0.75;
     list.push({
-      x: r() * W,
-      y: r() * H,
-      r: bright ? r() * 1.2 + 0.7 : r() * 0.6 + 0.2,
-      alpha: bright ? r() * 0.25 + 0.22 : r() * 0.18 + 0.06,
+      x: Math.cos(a) * rxy * rr, y: y * rr, z: Math.sin(a) * rxy * rr,
+      r: rng() * 0.9 + 0.35,
+      alpha: rng() * 0.22 + 0.06,
+      phase: rng() * Math.PI * 2,
+      freq: 0.4 + rng() * 1.1,
     });
   }
-  _bgCache = { W, H, list };
+  _dustCache = list;
   return list;
 }
 
-// 相机：手势拖动/缩放的状态
-const camera = { scale: 1, panX: 0, panY: 0 };
-// 当前布局，暴露给交互层做点击命中测试
-window.starmapLayout = null;
-
-function renderStarmap() {
-  const canvas = document.getElementById("memoryCanvas");
-  const graph = window.memoryGraph;
-  if (!canvas || !graph) return;
-  const cssW = canvas.clientWidth;
-  const cssH = canvas.clientHeight;
-  if (cssW === 0 || cssH === 0) {
-    requestAnimationFrame(renderStarmap);
-    return;
+// —— 纸面墨点：不转不闪的静态底噪，离屏缓存一张，每帧 drawImage ——
+let _paperCache = null;
+function paperInk(cssW, cssH, dpr) {
+  if (_paperCache && _paperCache.w === cssW && _paperCache.h === cssH) return _paperCache.cv;
+  const cv = document.createElement("canvas");
+  cv.width = cssW * dpr;
+  cv.height = cssH * dpr;
+  const c = cv.getContext("2d");
+  c.setTransform(dpr, 0, 0, dpr, 0, 0);
+  const rng = seededRng(42);
+  const n = Math.max(40, Math.floor((cssW * cssH) / 9000));
+  c.fillStyle = "rgba(48, 39, 28, 0.5)";
+  for (let i = 0; i < n; i++) {
+    c.globalAlpha = rng() * 0.10 + 0.04;
+    c.beginPath();
+    c.arc(rng() * cssW, rng() * cssH, rng() * 0.8 + 0.3, 0, Math.PI * 2);
+    c.fill();
   }
+  _paperCache = { w: cssW, h: cssH, cv };
+  return cv;
+}
+
+// —— 满屏闪烁星场：屏幕空间固定位置的细星，忽明忽灭（参考视频背景那层的魂）——
+let _twinkleCache = null;
+function twinkleField(cssW, cssH) {
+  if (_twinkleCache && _twinkleCache.w === cssW && _twinkleCache.h === cssH) return _twinkleCache.list;
+  const rng = seededRng(310); // 3 月 10 日
+  const list = [];
+  const n = Math.max(160, Math.floor((cssW * cssH) / 950));
+  for (let i = 0; i < n; i++) {
+    const quick = rng() > 0.85; // 少数星闪得快，其余慢慢呼吸
+    list.push({
+      x: rng() * cssW,
+      y: rng() * cssH,
+      r: rng() * 0.8 + 0.3,
+      base: rng() * 0.30 + 0.08,
+      phase: rng() * Math.PI * 2,
+      freq: quick ? 2.2 + rng() * 1.4 : 0.35 + rng() * 1.1,
+    });
+  }
+  _twinkleCache = { w: cssW, h: cssH, list };
+  return list;
+}
+
+// —— 相机与渲染循环 ——
+const view = {
+  // 初始 yaw 选 3.5：让两个最大星域（project / event）都朝向观察者，开屏就有名字可读
+  yaw: 3.5, pitch: -0.22, scale: 1,
+  vyaw: 0, vpitch: 0,          // 惯性速度
+  dragging: false,
+};
+const AUTO_SPIN = 0.0007;      // 空闲自转（rad/帧），约两分钟一圈
+const FOCAL = 2.4;             // 透视焦距（单位 = 投影半径）
+const CORE = [                 // 中心双星：泽在左，麦穗在右
+  { who: "ze", name: "泽", x: -0.055, y: 0, z: 0 },
+  { who: "maisui", name: "麦穗", x: 0.055, y: 0, z: 0 },
+];
+
+let layout3d = null;
+let selectedId = null;         // 选中的实体 id 或 "core:ze" / "core:maisui"
+let running = false;
+let projCache = [];            // 本帧投影结果，点击命中用
+let spinPauseUntil = 0;        // 交互后自转的"冷静期"截止时间；恢复时短暂缓升
+
+function project(px, py, pz, cx, cy, R, siny, cosy, sinp, cosp) {
+  const x1 = px * cosy + pz * siny;
+  const z1 = -px * siny + pz * cosy;
+  const y2 = py * cosp - z1 * sinp;
+  const z2 = py * sinp + z1 * cosp;
+  const persp = FOCAL / (FOCAL + z2);
+  return { sx: cx + x1 * R * persp, sy: cy + y2 * R * persp, z: z2, persp };
+}
+// 深度 → 亮度因子：非线性，亮度向近处集中。
+// 近端 1 → 中距 ~0.3 → 远端 0.08，动态范围拉满，星多了也糊不成一片白。
+function depthAlpha(z) {
+  const lin = Math.max(0, Math.min(1, (1.15 - z) / 2.3));
+  return 0.08 + 0.92 * Math.pow(lin, 2);
+}
+
+function frame(ts) {
+  const canvas = document.getElementById("memoryCanvas");
+  const memView = document.getElementById("memoryView");
+  if (!canvas || !memView || memView.hidden) { running = false; return; }
+  const graph = window.memoryGraph;
+  const cssW = canvas.clientWidth, cssH = canvas.clientHeight;
+  if (!cssW || !cssH) { requestAnimationFrame(frame); return; }
   const dpr = window.devicePixelRatio || 1;
   if (canvas.width !== cssW * dpr || canvas.height !== cssH * dpr) {
     canvas.width = cssW * dpr;
     canvas.height = cssH * dpr;
   }
   const ctx = canvas.getContext("2d");
-
-  // 底 + 星尘（不受相机影响，星尘是"窗外"的）
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-  ctx.fillStyle = "#f6efe4";  // --bg 米黄
+  const t = (ts || 0) / 1000;
+  const now = Date.now();
+
+  // 惯性（拖动中不衰减，跟手优先）
+  if (!view.dragging) {
+    view.yaw += view.vyaw;
+    view.pitch += view.vpitch;
+    view.vyaw *= 0.93;
+    view.vpitch *= 0.93;
+    if (Math.abs(view.vyaw) < 0.00012) view.vyaw = 0;
+    if (Math.abs(view.vpitch) < 0.00012) view.vpitch = 0;
+    view.pitch = Math.max(-1.25, Math.min(1.25, view.pitch));
+  }
+  // 自转分两类交互对待：
+  // - 按住 / 详情面板开着：纯拦截，不欠债——一解除立刻恢复（tap 零延迟）。
+  // - 真拖拽甩出的惯性：滑完埋 700ms 冷静期，再 0.9 秒缓升，不跟泽抢方向。
+  const coasting = Math.abs(view.vyaw) + Math.abs(view.vpitch) > 0.0004;
+  const detailOpen = !document.getElementById("memoryDetail").hidden;
+  if (!view.dragging && !detailOpen) {
+    if (coasting) {
+      spinPauseUntil = now + 700;
+    } else if (now > spinPauseUntil) {
+      const ramp = Math.min(1, (now - spinPauseUntil) / 900);
+      view.yaw += AUTO_SPIN * ramp;
+    }
+  }
+
+  // 底色 + 纸面墨点 + 满屏闪烁星场
+  ctx.fillStyle = "#7d6e58";
   ctx.fillRect(0, 0, cssW, cssH);
-  ctx.fillStyle = "#8a7860";  // 暖棕墨点
-  for (const s of backgroundStars(cssW, cssH)) {
-    ctx.globalAlpha = s.alpha;
+  ctx.drawImage(paperInk(cssW, cssH, dpr), 0, 0, cssW, cssH);
+  ctx.fillStyle = "#faf3e4";
+  for (const s of twinkleField(cssW, cssH)) {
+    const wave = 0.5 + 0.5 * Math.sin(t * s.freq + s.phase);
+    ctx.globalAlpha = s.base * Math.pow(wave, 1.8); // 波谷压深 → 真的会灭
     ctx.beginPath();
     ctx.arc(s.x, s.y, s.r, 0, Math.PI * 2);
     ctx.fill();
   }
   ctx.globalAlpha = 1;
 
-  const entities = graph.entities || [];
-  const links = graph.links || [];
-  const layout = buildLayout(cssW, cssH, entities);
-  window.starmapLayout = layout;
+  const cx = cssW / 2, cy = cssH / 2 + 14; // 稍下移，给顶部标题留呼吸
+  const R = Math.min(cssW, cssH) * 0.40 * view.scale;
+  const siny = Math.sin(view.yaw), cosy = Math.cos(view.yaw);
+  const sinp = Math.sin(view.pitch), cosp = Math.cos(view.pitch);
+  const P = (n) => project(n.x, n.y, n.z, cx, cy, R, siny, cosy, sinp, cosp);
 
-  // 应用相机变换，之后所有绘制走世界坐标
-  ctx.translate(camera.panX * dpr, camera.panY * dpr);
-  ctx.scale(camera.scale, camera.scale);
-
-  // 方位标签（淡雅题头，不抢星点风头）
-  ctx.font = `${13 / camera.scale}px "Songti SC", "SimSun", serif`;
-  ctx.textAlign = "center";
-  ctx.fillStyle = "rgba(90, 70, 45, 0.32)";
-  for (const g of layout.galaxies) {
-    const outAng = (g.meta.angleDeg * Math.PI) / 180;
-    const outR = 24 / camera.scale;
-    ctx.fillText(g.meta.label, g.gx + Math.cos(outAng) * outR, g.gy + Math.sin(outAng) * outR);
-  }
-
-  // 桥线（墨色淡笔）
-  ctx.strokeStyle = "rgba(60, 40, 20, 0.22)";
-  for (const link of links) {
-    const a = layout.positions.get(link.a);
-    const b = layout.positions.get(link.b);
-    if (!a || !b) continue;
-    ctx.lineWidth = Math.min(2.4, 0.4 + Math.log2(1 + link.weight) * 0.5) / camera.scale;
+  // 3D 星尘壳（穿过视点太近的裁掉，避免一颗尘糊满屏）；跟着转，也各自明灭
+  ctx.fillStyle = "#faf3e4";
+  for (const d of dustShell()) {
+    const p = P(d);
+    if (p.persp > 2.2 || p.persp <= 0) continue;
+    const wave = 0.5 + 0.5 * Math.sin(t * d.freq + d.phase);
+    ctx.globalAlpha = d.alpha * depthAlpha(p.z) * (0.3 + 0.7 * wave);
     ctx.beginPath();
-    ctx.moveTo(a.x, a.y);
-    ctx.lineTo(b.x, b.y);
+    ctx.arc(p.sx, p.sy, d.r * p.persp, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.globalAlpha = 1;
+
+  if (!graph || !layout3d) { requestAnimationFrame(frame); return; }
+  const nodes = layout3d.nodes;
+
+  // 投影全部数据星（缓存给点击命中用）
+  projCache = [];
+  for (const n of nodes) {
+    const p = P(n);
+    projCache.push({ node: n, ...p });
+  }
+  const projById = new Map();
+  for (const pc of projCache) projById.set(pc.node.entity.id, pc);
+
+  // 桥线：透明度按两端深度均值，选中星的桥提亮
+  for (const link of (graph.links || [])) {
+    const a = projById.get(link.a);
+    const b = projById.get(link.b);
+    if (!a || !b) continue;
+    const dl = (depthAlpha(a.z) + depthAlpha(b.z)) / 2;
+    const hot = selectedId && (link.a === selectedId || link.b === selectedId);
+    ctx.strokeStyle = hot ? "rgba(224, 158, 116, 0.75)" : "rgba(242, 230, 206, 1)";
+    ctx.globalAlpha = hot ? Math.min(1, 0.25 + dl * 1.3) : (0.04 + 0.2 * dl);
+    ctx.lineWidth = (hot ? 1.1 : 0.5) + Math.log2(1 + (link.weight || 1)) * 0.28;
+    ctx.beginPath();
+    ctx.moveTo(a.sx, a.sy);
+    ctx.lineTo(b.sx, b.sy);
     ctx.stroke();
   }
+  ctx.globalAlpha = 1;
 
-  // 实体
-  ctx.font = `${12 / camera.scale}px "Songti SC", "SimSun", serif`;
-  ctx.textAlign = "center";
-  for (const p of layout.positions.values()) {
-    // 浅色底下的"光晕"改成向 bg 淡出的柔化环，别太亮
-    const glow = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, p.r * 3.2);
-    glow.addColorStop(0, p.color + "55");
-    glow.addColorStop(1, p.color + "00");
-    ctx.fillStyle = glow;
-    ctx.beginPath();
-    ctx.arc(p.x, p.y, p.r * 3.2, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.fillStyle = p.color;
-    ctx.beginPath();
-    ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.fillStyle = "#3a3026";  // --ink 墨色
-    ctx.fillText(p.entity.name, p.x, p.y + p.r + 14 / camera.scale);
+  // 数据星：远的先画
+  const sorted = projCache.slice().sort((a, b) => b.z - a.z);
+  for (const pc of sorted) {
+    drawStar(ctx, pc.sx, pc.sy, pc.node.r * pc.persp * 0.62, depthAlpha(pc.z), {
+      ring: pc.node.ring,
+      selected: pc.node.entity.id === selectedId,
+    });
   }
 
-  // 中间双星：两颗紧挨的球 + 一条居中的合并标签
-  drawCoreOrb(ctx, layout.cx - 9, layout.cy, "#c9673f");  // 主色橙
-  drawCoreOrb(ctx, layout.cx + 9, layout.cy, "#d4954a");  // 赭黄
-  ctx.font = `${11 / camera.scale}px "Songti SC", "SimSun", serif`;
+  // 中心双星：最亮、带双环、名字常显
+  const coreProj = CORE.map((c) => ({ core: c, ...P(c) }));
+  for (const cp of coreProj.slice().sort((a, b) => b.z - a.z)) {
+    drawStar(ctx, cp.sx, cp.sy, 5.2 * cp.persp, 1, {
+      bright: true, ring: true, ring2: true,
+      selected: selectedId === "core:" + cp.core.who,
+    });
+  }
+  const mid = {
+    sx: (coreProj[0].sx + coreProj[1].sx) / 2,
+    sy: Math.max(coreProj[0].sy, coreProj[1].sy),
+  };
+  ctx.font = `12px ${STAR_FONT}`;
   ctx.textAlign = "center";
-  ctx.fillStyle = "#3a3026";
-  ctx.fillText("泽 · 麦穗", layout.cx, layout.cy + 30 / camera.scale);
+  ctx.fillStyle = "rgba(250, 243, 229, 0.92)";
+  ctx.fillText("泽 · 麦穗", mid.sx, mid.sy + 26);
+
+  // 标签：碎片数排名前 K 的才显示，缩放越大显示越多；背面的淡出不画。
+  // rank 高的先占位，跟已画标签打架的让位；顶部标题区 / 底部提示区不进。
+  const K = view.scale < 1.35 ? 9 : view.scale < 2 ? 18 : 999;
+  ctx.font = `10.5px ${STAR_FONT}`;
+  const placed = [{ x: mid.sx, y: mid.sy + 26, w: 60 }]; // 双星名字先占位
+  const headSafe = 150, footSafe = cssH - 58;
+  const byRank = projCache.slice().sort((a, b) => a.node.labelRank - b.node.labelRank);
+  for (const pc of byRank) {
+    const show = pc.node.labelRank < K || pc.node.entity.id === selectedId;
+    const da = depthAlpha(pc.z);
+    if (!show || da < 0.34) continue;
+    const ly = pc.sy + pc.node.r * pc.persp * 0.62 + 13;
+    if (ly < headSafe || ly > footSafe) continue;
+    const w = ctx.measureText(pc.node.entity.name).width;
+    if (pc.sx - w / 2 < 10 || pc.sx + w / 2 > cssW - 10) continue; // 出屏边的不画半截
+    let clash = false;
+    for (const pl of placed) {
+      if (Math.abs(pc.sx - pl.x) < (w + pl.w) / 2 + 10 && Math.abs(ly - pl.y) < 15) { clash = true; break; }
+    }
+    if (clash) continue;
+    placed.push({ x: pc.sx, y: ly, w });
+    ctx.fillStyle = `rgba(247, 239, 224, ${(0.88 * da).toFixed(3)})`;
+    ctx.fillText(pc.node.entity.name, pc.sx, ly);
+  }
+
+  requestAnimationFrame(frame);
 }
 
-// 只画球+光晕，不带 label（合并标签由 renderStarmap 统一居中画）
-function drawCoreOrb(ctx, x, y, color) {
-  const glow = ctx.createRadialGradient(x, y, 0, x, y, 24);
-  glow.addColorStop(0, color + "66");
-  glow.addColorStop(1, color + "00");
+// 一颗星：光晕 + 核心 + 可选细环（参考旧星表里的"命名亮星"画法）
+function drawStar(ctx, x, y, r, da, opt) {
+  const rr = Math.max(1.1, r);
+  // 光晕半径也吃深度：近星晕开、远星几乎裸点，层次跟着拉
+  const gr = rr * (2.0 + 1.8 * da);
+  const glow = ctx.createRadialGradient(x, y, 0, x, y, gr);
+  glow.addColorStop(0, `rgba(250, 240, 218, ${(0.46 * da).toFixed(3)})`);
+  glow.addColorStop(1, "rgba(250, 240, 218, 0)");
   ctx.fillStyle = glow;
   ctx.beginPath();
-  ctx.arc(x, y, 24, 0, Math.PI * 2);
+  ctx.arc(x, y, gr, 0, Math.PI * 2);
   ctx.fill();
-  ctx.fillStyle = color;
+
+  ctx.fillStyle = opt.bright
+    ? `rgba(253, 246, 227, ${da})`
+    : `rgba(246, 236, 212, ${(0.92 * da).toFixed(3)})`;
   ctx.beginPath();
-  ctx.arc(x, y, 6, 0, Math.PI * 2);
+  ctx.arc(x, y, rr, 0, Math.PI * 2);
   ctx.fill();
+
+  if (opt.ring) {
+    ctx.strokeStyle = `rgba(244, 233, 210, ${(0.5 * da).toFixed(3)})`;
+    ctx.lineWidth = 0.7;
+    ctx.beginPath();
+    ctx.arc(x, y, rr * 2.2, 0, Math.PI * 2);
+    ctx.stroke();
+  }
+  if (opt.ring2) {
+    ctx.strokeStyle = `rgba(244, 233, 210, ${(0.28 * da).toFixed(3)})`;
+    ctx.lineWidth = 0.6;
+    ctx.beginPath();
+    ctx.arc(x, y, rr * 3.1, 0, Math.PI * 2);
+    ctx.stroke();
+  }
+  if (opt.selected) {
+    ctx.strokeStyle = "rgba(224, 158, 116, 0.9)";
+    ctx.lineWidth = 1.4;
+    ctx.beginPath();
+    ctx.arc(x, y, rr * 2.2 + 3, 0, Math.PI * 2);
+    ctx.stroke();
+  }
 }
 
-// 尺寸变化重画（旋转手机、桌面窗口拖动）
-window.addEventListener("resize", () => {
-  if (!document.getElementById("memoryView").hidden) renderStarmap();
-});
+function renderStarmap() {
+  const graph = window.memoryGraph;
+  if (graph) layout3d = buildLayout3D(graph.entities || []);
+  if (!running) {
+    running = true;
+    requestAnimationFrame(frame);
+  }
+}
 
-// —— 手势：单指平移、双指 pinch 缩放、单指点击选中 —— //
+// —— 手势：单指旋转（带惯性）、双指 pinch 缩放、单指点击选中 —— //
 const pointers = new Map();
 let pinchState = null;
 
@@ -219,12 +413,16 @@ function attachStarmapGestures() {
 
   canvas.addEventListener("pointerdown", (e) => {
     e.preventDefault();
-    canvas.setPointerCapture(e.pointerId);
+    // 指针已失效/合成事件时 capture 会抛 NotFoundError，别让它打断手势
+    try { canvas.setPointerCapture(e.pointerId); } catch { /* 无碍 */ }
     pointers.set(e.pointerId, {
       x: e.clientX, y: e.clientY,
       downX: e.clientX, downY: e.clientY,
       downT: Date.now(), moved: false,
     });
+    view.dragging = true;
+    view.vyaw = 0;
+    view.vpitch = 0;
     if (pointers.size === 2) startPinch();
   });
 
@@ -238,10 +436,15 @@ function attachStarmapGestures() {
     if (Math.hypot(e.clientX - p.downX, e.clientY - p.downY) > 6) p.moved = true;
 
     if (pointers.size === 1) {
-      // 单指拖动 = 平移
-      camera.panX += dx;
-      camera.panY += dy;
-      renderStarmap();
+      // 单指拖动 = 转动星空
+      const w = canvas.clientWidth || 1, h = canvas.clientHeight || 1;
+      const dyaw = dx * (Math.PI / w) * 1.15;
+      const dpitch = dy * (Math.PI / h) * 0.9;
+      view.yaw += dyaw;
+      view.pitch = Math.max(-1.25, Math.min(1.25, view.pitch + dpitch));
+      // 抬手惯性用最近几帧的速度
+      view.vyaw = view.vyaw * 0.5 + dyaw * 0.35;
+      view.vpitch = view.vpitch * 0.5 + dpitch * 0.35;
     } else if (pointers.size === 2 && pinchState) {
       updatePinch();
     }
@@ -251,9 +454,11 @@ function attachStarmapGestures() {
     const p = pointers.get(e.pointerId);
     pointers.delete(e.pointerId);
     if (pointers.size < 2) pinchState = null;
+    if (pointers.size === 0) view.dragging = false; // 惯性接管
     if (!p) return;
-    // 单指、没拖过、时间短 → 视为点击
     if (!p.moved && Date.now() - p.downT < 500 && pointers.size === 0) {
+      view.vyaw = 0;
+      view.vpitch = 0;
       handleTap(p.x, p.y, canvas);
     }
   };
@@ -265,60 +470,54 @@ function startPinch() {
   const [a, b] = [...pointers.values()];
   pinchState = {
     initDist: Math.hypot(a.x - b.x, a.y - b.y),
-    initScale: camera.scale,
-    initCx: (a.x + b.x) / 2,
-    initCy: (a.y + b.y) / 2,
-    initPanX: camera.panX,
-    initPanY: camera.panY,
+    initScale: view.scale,
   };
 }
 function updatePinch() {
   const [a, b] = [...pointers.values()];
   const dist = Math.hypot(a.x - b.x, a.y - b.y);
-  const cx = (a.x + b.x) / 2;
-  const cy = (a.y + b.y) / 2;
-  const rawScale = pinchState.initScale * (dist / pinchState.initDist);
-  const newScale = Math.max(0.4, Math.min(4, rawScale));
-  const ratio = newScale / pinchState.initScale;
-  camera.scale = newScale;
-  // 让两指中心的世界坐标点保持不动
-  camera.panX = cx - (pinchState.initCx - pinchState.initPanX) * ratio;
-  camera.panY = cy - (pinchState.initCy - pinchState.initPanY) * ratio;
-  renderStarmap();
+  view.scale = Math.max(0.55, Math.min(2.8, pinchState.initScale * (dist / pinchState.initDist)));
 }
 
 function handleTap(screenX, screenY, canvas) {
-  const layout = window.starmapLayout;
-  if (!layout) return;
   const rect = canvas.getBoundingClientRect();
-  const cssX = screenX - rect.left;
-  const cssY = screenY - rect.top;
-  // screen(css) → world 逆变换
-  const wx = (cssX - camera.panX) / camera.scale;
-  const wy = (cssY - camera.panY) / camera.scale;
+  const tx = screenX - rect.left;
+  const ty = screenY - rect.top;
 
-  // 先命中中心双星（比实体大，命中区取球+光晕范围）
-  const coreHitR = 18 / camera.scale;
-  const dZe = Math.hypot(layout.cx - 9 - wx, layout.cy - wy);
-  const dMai = Math.hypot(layout.cx + 9 - wx, layout.cy - wy);
-  if (dZe < coreHitR && dZe <= dMai) return showCoreDetail("ze");
-  if (dMai < coreHitR) return showCoreDetail("maisui");
-
-  // 再找最近的实体
-  let hit = null;
-  let bestD = Infinity;
-  const hitPad = 12 / camera.scale;
-  for (const p of layout.positions.values()) {
-    const d = Math.hypot(p.x - wx, p.y - wy);
-    if (d < p.r + hitPad && d < bestD) {
-      bestD = d;
-      hit = p;
+  // 双星命中区大一点（用上一帧投影，误差一帧可忽略）
+  const cssW = canvas.clientWidth, cssH = canvas.clientHeight;
+  const cx = cssW / 2, cy = cssH / 2 + 14;
+  const R = Math.min(cssW, cssH) * 0.40 * view.scale;
+  const siny = Math.sin(view.yaw), cosy = Math.cos(view.yaw);
+  const sinp = Math.sin(view.pitch), cosp = Math.cos(view.pitch);
+  for (const c of CORE) {
+    const p = project(c.x, c.y, c.z, cx, cy, R, siny, cosy, sinp, cosp);
+    if (Math.hypot(p.sx - tx, p.sy - ty) < 20) {
+      selectedId = "core:" + c.who;
+      return showCoreDetail(c.who);
     }
   }
-  if (hit) showEntityDetail(hit.entity.id);
-  else hideEntityDetail();
+
+  // 数据星：命中半径随投影大小，多命中取离观察者最近的
+  let hit = null;
+  let bestZ = Infinity;
+  for (const pc of projCache) {
+    const rr = Math.max(13, pc.node.r * pc.persp * 0.62 * 2.4);
+    if (Math.hypot(pc.sx - tx, pc.sy - ty) < rr && pc.z < bestZ) {
+      bestZ = pc.z;
+      hit = pc.node;
+    }
+  }
+  if (hit) {
+    selectedId = hit.entity.id;
+    showEntityDetail(hit.entity.id);
+  } else {
+    selectedId = null;
+    hideEntityDetail();
+  }
 }
 
+// —— 详情面板（沿用原有 DOM 与接口） —— //
 async function showEntityDetail(id) {
   const token = localStorage.getItem("home_token") || "";
   try {
@@ -388,6 +587,7 @@ function renderFragments(fragments, emptyText) {
 
 function hideEntityDetail() {
   document.getElementById("memoryDetail").hidden = true;
+  selectedId = null;
 }
 
 function friendlyAge(days) {

@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="16" height="8" viewBox="0 0 16 8">
+  <!-- 小票撕边齿单元：纸色实心三角尖朝上，齿间透出深底。repeat-x 平铺成整条撕边。 -->
+  <path d="M0 8 L8 0 L16 8 Z" fill="#fffdf8"/>
+</svg>

@@ -40,6 +40,8 @@
   --serif: "Songti SC", "STSong", "SimSun", Georgia, "Times New Roman", serif;
   /* 聊天正文：京华老宋体打头，没加载好之前楷体顶 */
   --kai: "KingHwa_OldSong", Georgia, "Kaiti SC", "STKaiti", "KaiTi", "DFKai-SB", serif;
+  /* 小票机打字：西文数字命中真等宽，中文按字符回落到旧宋，混排自动成立 */
+  --mono: ui-monospace, "SF Mono", Menlo, Consolas, "KingHwa_OldSong", "Courier New", monospace;
   /* 聊天正文（官端同款配方）：西文衬线管数字英文，中文落到系统宋体——
      iPhone 上是宋体-简（跟 Claude 官方 app 一个效果），Windows 上退到中易宋体 */
   --prose: ui-serif, Georgia, "Songti SC", "STSong", "SimSun", serif;
@@ -992,44 +994,113 @@ footer textarea::placeholder { color: var(--muted); opacity: .75; }
 .msg-count.empty .unit { font-style: italic; }
 .clock-mini[hidden], #homeDate[hidden] { display: none; }
 
-/* —— 记忆星图 —— */
+/* —— 记忆星图：深纸色底上的印刷星表（3D 画布 + 覆盖排版层） —— */
 #memoryView {
-  background: var(--bg);
-  color: var(--ink);
+  background: var(--ticket-bed, #7d6e58);
+  color: #f2e9d8;
   overflow: hidden;
 }
-.memory-topbar {
-  position: absolute; top: 0; left: 0; right: 0; z-index: 3;
-  display: flex; align-items: center; gap: 10px;
-  padding: 12px 16px;
-  padding-top: calc(12px + env(safe-area-inset-top));
-  background: linear-gradient(180deg, rgba(246,239,228,.92), rgba(246,239,228,0));
-}
-.memory-back {
-  border: none; background: none; color: var(--ink);
-  font-size: 18px; padding: 4px 8px; cursor: pointer;
-}
-.memory-title { display: flex; flex-direction: column; line-height: 1.1; font-family: var(--serif); }
-.memory-title span { font-size: 17px; letter-spacing: 2px; color: var(--ink); }
-.memory-title small { font-size: 11px; color: var(--muted); margin-top: 3px; }
-
 #memoryCanvas {
-  position: absolute; inset: 0;
+  position: absolute; inset: 0; z-index: 0;
   width: 100%; height: 100%;
   touch-action: none; /* 手势自己处理，浏览器别抢 */
 }
+/* 四周渐暗，星点对比更足；不挡手势 */
+.star-vignette {
+  position: absolute; inset: 0; z-index: 1; pointer-events: none;
+  background: radial-gradient(ellipse at center, transparent 52%, rgba(40, 32, 22, 0.34));
+}
+/* 印刷星表的细线框 + 四角角标 */
+.star-frame {
+  position: absolute; z-index: 1; pointer-events: none;
+  inset: calc(10px + env(safe-area-inset-top)) 12px calc(10px + env(safe-area-inset-bottom));
+  border: 1px solid rgba(242, 233, 216, 0.13);
+}
+.star-frame::before {
+  content: ""; position: absolute; inset: -1px;
+  --ck: rgba(242, 233, 216, 0.5);
+  background:
+    linear-gradient(var(--ck), var(--ck)) left 0 top 0 / 14px 1.5px,
+    linear-gradient(var(--ck), var(--ck)) left 0 top 0 / 1.5px 14px,
+    linear-gradient(var(--ck), var(--ck)) right 0 top 0 / 14px 1.5px,
+    linear-gradient(var(--ck), var(--ck)) right 0 top 0 / 1.5px 14px,
+    linear-gradient(var(--ck), var(--ck)) left 0 bottom 0 / 14px 1.5px,
+    linear-gradient(var(--ck), var(--ck)) left 0 bottom 0 / 1.5px 14px,
+    linear-gradient(var(--ck), var(--ck)) right 0 bottom 0 / 14px 1.5px,
+    linear-gradient(var(--ck), var(--ck)) right 0 bottom 0 / 1.5px 14px;
+  background-repeat: no-repeat;
+}
+
+/* 排版层：大衬线标题 + 右上数据 + 斜体引导句。整层不挡手势，返回键单独可点 */
+.star-head {
+  position: absolute; z-index: 2; left: 0; right: 0; top: 0;
+  padding: calc(22px + env(safe-area-inset-top)) 26px 0;
+  pointer-events: none;
+}
+.star-head-row {
+  display: flex; align-items: baseline; justify-content: space-between; gap: 12px;
+}
+.star-title {
+  margin: 0;
+  font-family: "Didot", var(--kai), Georgia, serif;
+  font-weight: 400;
+  font-size: 42px;
+  letter-spacing: 1px;
+  color: #dfa07a;
+  text-shadow: 0 1px 12px rgba(40, 30, 20, 0.35);
+}
+.star-meta {
+  font-family: var(--mono);
+  font-size: 9.5px;
+  letter-spacing: 2.5px;
+  color: rgba(242, 233, 216, 0.6);
+  white-space: nowrap;
+}
+.star-sub-row {
+  display: flex; align-items: center; gap: 4px; margin-top: 2px;
+}
+.memory-back {
+  pointer-events: auto;
+  border: none; background: none; color: rgba(242, 233, 216, 0.75);
+  font-size: 15px; padding: 6px 10px 6px 0; cursor: pointer;
+}
+.star-tagline {
+  margin: 0;
+  font-family: "Didot", Georgia, "Times New Roman", serif;
+  font-style: italic;
+  font-size: 13px;
+  color: rgba(242, 233, 216, 0.62);
+}
+/* 右侧竖排小字：这张图的三个维度 */
+.star-axis {
+  position: absolute; z-index: 2; pointer-events: none;
+  right: 22px; top: 50%; transform: translateY(-50%);
+  writing-mode: vertical-rl;
+  font-family: var(--mono);
+  font-size: 9px; letter-spacing: 4px;
+  color: rgba(242, 233, 216, 0.38);
+}
+/* 底部操作提示 */
+.star-hint {
+  position: absolute; z-index: 2; pointer-events: none;
+  left: 0; right: 0; bottom: calc(20px + env(safe-area-inset-bottom));
+  text-align: center;
+  font-family: var(--mono);
+  font-size: 8.5px; letter-spacing: 2.5px;
+  color: rgba(242, 233, 216, 0.42);
+}
 
 .memory-empty {
-  position: absolute; left: 0; right: 0; top: 62%;
+  position: absolute; z-index: 2; left: 0; right: 0; top: 62%;
   display: flex; flex-direction: column; align-items: center;
   text-align: center; padding: 0 40px;
-  color: var(--ink); font-family: var(--serif);
+  color: #f2e9d8; font-family: var(--serif);
   pointer-events: none;
 }
 .memory-empty[hidden] { display: none; }
 .memory-empty * { pointer-events: none; }
 .empty-title { font-size: 22px; margin-bottom: 12px; }
-.empty-sub { font-size: 13px; color: var(--muted); line-height: 1.7; }
+.empty-sub { font-size: 13px; color: rgba(242, 233, 216, 0.58); line-height: 1.7; }
 
 .memory-detail {
   position: absolute; left: 0; right: 0; bottom: 0; z-index: 4;
@@ -1137,81 +1208,211 @@ footer textarea::placeholder { color: var(--muted); opacity: .75; }
     max(22px, calc((100% - 500px) / 2))
     calc(104px + env(safe-area-inset-bottom));
 }
+/* 页标题（2026-07-18 改引导行排法：英文带页码上移成小引导行，中文大字在下收拢字距。
+   页码跟票根 NO.001 / 小票 NO.01 一个语言：整个 app 是一套票据编目 */
 .page-title {
-  font-family: var(--kai); font-size: 30px; color: var(--ink);
-  letter-spacing: 6px; margin-bottom: 26px;
+  font-family: var(--kai); font-size: 28px; color: var(--ink);
+  letter-spacing: 4px; margin-bottom: 26px;
 }
 .page-en {
-  font-family: "Canela", Georgia, serif;
-  font-size: 11px; letter-spacing: 4px; color: var(--muted);
-  margin-left: 8px; vertical-align: 6px;
+  display: block;
+  font-family: var(--mono);
+  font-size: 10px; letter-spacing: 3px; color: var(--muted);
+  margin: 0 0 7px 2px;
 }
 
-.tool-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+/* ── 工具页票根（2026-07-18 三稿：形状整个交给 ticket-shape.svg，G 老师出图泽拍板）──
+   二稿手搓圆片：齿口大小不一还跟圆角打架，狗啃。三稿单张 SVG 当 mask 裁形，
+   齿口/圆角切/冲孔线全画在 assets/ticket-shape.svg 里（840x320，冲孔线 x=600 即 5:2 分界）。
+   外壳 .tool-card 只负责阴影：mask 会把普通 box-shadow 一起裁掉，
+   所以用 filter: drop-shadow，投影自动沿裁完的轮廓走。
+   ⚠️ 不要再叠加 border-radius、clip-path、radial-gradient 或伪元素制作齿口。 */
+/* 深底两页共用：泽嫌 #665640 跟票纸对比过强，提亮到 #7d6e58（2026-07-18） */
+#toolsView, #settingsView { --ticket-bed: #7d6e58; background: var(--ticket-bed); }
+#toolsView .page-title, #settingsView .page-title { color: #f2e9d8; }
+#toolsView .page-en, #settingsView .page-en { color: rgba(242, 233, 216, .62); }
+/* 设置页长票别被底部导航吃掉尾巴 */
+#settingsView .page-scroll { padding-bottom: calc(132px + env(safe-area-inset-bottom)); }
+.tool-grid { display: grid; grid-template-columns: 1fr; gap: 22px; }
+/* 外层只负责阴影 */
 .tool-card {
-  display: flex; flex-direction: column; align-items: flex-start; gap: 8px;
-  padding: 20px 18px; text-align: left;
-  background: var(--panel); border: 1px solid var(--line); border-radius: 16px;
+  padding: 0; border: none; background: none; text-align: left;
   font-family: var(--kai); color: var(--ink); cursor: pointer;
+  filter: drop-shadow(0 10px 14px rgba(38, 30, 21, 0.22));
 }
-.tool-card b { font-size: 16px; font-weight: 600; letter-spacing: 2px; }
-.tool-card small { font-size: 11.5px; color: var(--muted); letter-spacing: 1px; }
-.tool-card-icon { color: var(--name); }
+.ticket {
+  width: 100%;
+  aspect-ratio: 21 / 8;
+  background: #fffdf8;
+
+  -webkit-mask:
+    url("assets/ticket-shape.svg")
+    center / 100% 100% no-repeat;
+  mask:
+    url("assets/ticket-shape.svg")
+    center / 100% 100% no-repeat;
+
+  display: grid;
+  grid-template-columns: 5fr 2fr;
+}
+/* 左主券 */
+.ticket-main {
+  display: flex; flex-direction: column; justify-content: center; gap: 6px;
+  padding: 20px 14px 18px 26px; min-width: 0;
+}
+.ticket-title { display: flex; align-items: center; gap: 10px; }
+.tool-card b {
+  font-size: 21px; font-weight: 700; letter-spacing: 3px;
+  font-family: var(--serif);
+}
+.tool-card small { font-size: 11.5px; color: var(--muted); letter-spacing: 1.5px; }
+.ticket-meta {
+  margin-top: 10px; font-size: 9px; color: var(--muted);
+  font-family: var(--serif); letter-spacing: 2.2px; text-transform: uppercase;
+  opacity: .85; white-space: nowrap;
+}
+.tool-card-icon { color: var(--name); display: inline-flex; }
 /* 议事厅图标换青灰，跟群聊里 GPT 的配色呼应 */
 #toolGroup .tool-card-icon { color: var(--gpt); }
-.tool-card-icon svg { width: 26px; height: 26px; }
+.tool-card-icon svg { width: 21px; height: 21px; }
+/* 右副券：微黄一档的纸色 + 竖排字 + 条码（分界冲孔线在 SVG 里，正好骑在 5:2 边上） */
+.ticket-stub {
+  display: flex; align-items: center; justify-content: center; gap: 9px;
+  background: #f7f0e2;
+  padding: 12px 4px;
+}
+.stub-label {
+  writing-mode: vertical-rl; font-size: 8.5px; letter-spacing: 3px;
+  color: var(--muted); font-family: var(--serif); text-transform: uppercase;
+}
+/* 条码：不等宽条纹一组循环，竖着放 */
+.stub-barcode {
+  width: 21px; height: 78px; color: var(--ink); opacity: .6;
+  background: repeating-linear-gradient(to bottom,
+    currentColor 0 1.5px, rgba(0,0,0,0) 1.5px 3px,
+    currentColor 3px 3.8px, rgba(0,0,0,0) 3.8px 6.6px,
+    currentColor 6.6px 8.8px, rgba(0,0,0,0) 8.8px 9.8px,
+    currentColor 9.8px 10.6px, rgba(0,0,0,0) 10.6px 13.4px,
+    currentColor 13.4px 15.2px, rgba(0,0,0,0) 15.2px 17px);
+}
 .tool-card-soon { opacity: .45; cursor: default; }
 
-.settings-group {
-  background: var(--panel); border: 1px solid var(--line); border-radius: 16px;
-  padding: 18px;
+/* ── 设置页小票（2026-07-18：泽拍板"工具页=入场券，设置页=收据"，一张长票 + 可折叠条目）──
+   撕边不能学票根整张 SVG mask：票高随内容/折叠变，mask 拉 100% 会把齿拉变形，
+   拆多层 mask 又是一稿 iOS 翻车的老路。所以齿条 SVG 当普通背景图 repeat-x
+   （纸色实齿、齿口透深底），中段普通纸色 div，外壳 drop-shadow 沿齿投影，全是标准渲染路径。
+   折叠区 = 票面一个 line item，收起时右侧打当前通道名；以后加功能就往下加 NO.02… */
+.receipt {
+  width: min(100%, 400px); margin: 0 auto;
+  filter: drop-shadow(0 10px 14px rgba(38, 30, 21, .22));
 }
-.settings-head {
-  font-family: var(--kai); font-size: 15px; color: var(--ink);
-  letter-spacing: 2px; margin-bottom: 4px;
+.receipt-edge { height: 8px; background: url("assets/receipt-edge.svg") left bottom / 16px 8px repeat-x; }
+.receipt-edge-btm { transform: scaleY(-1); }
+.receipt-paper {
+  background: #fffdf8; color: var(--ink);
+  padding: 24px 20px 20px;
+  font-family: var(--mono);
+}
+.receipt-store {
+  text-align: center; font-size: 24px; font-weight: 700;
+  letter-spacing: 7px; line-height: 1.4; margin-bottom: 12px;
+}
+.receipt-meta {
+  display: flex; flex-direction: column; align-items: center; gap: 3px;
+  font-size: 10px; letter-spacing: 1.8px; color: #6e5f4e;
+}
+.receipt-meta i { font-style: normal; }
+.receipt-rule { border-top: 3px double var(--ink); margin: 14px 0; opacity: .75; }
+
+/* 折叠条目行：小票上的一个 line item，点开才是明细 */
+.receipt-sec summary {
+  display: flex; align-items: baseline; gap: 8px;
+  font-size: 13px; font-weight: 700; letter-spacing: 1px;
+  cursor: pointer; list-style: none; padding: 2px 0;
+}
+.receipt-sec summary::-webkit-details-marker { display: none; }
+.sec-no { font-size: 11px; color: #6e5f4e; }
+.sec-dots { flex: 1; min-width: 20px; border-bottom: 2px dotted rgba(58, 48, 38, .35); transform: translateY(-3px); }
+.sec-val { font-size: 12px; letter-spacing: 2px; }
+.sec-arrow { font-size: 10px; align-self: center; transition: transform .2s; }
+.receipt-sec[open] .sec-arrow { transform: rotate(180deg); }
+.sec-body { padding-top: 10px; }
+
+.receipt-subhead {
+  margin-top: 18px; padding-top: 12px;
+  border-top: 1px dashed rgba(58, 48, 38, .3);
+  font-size: 11px; font-weight: 700; letter-spacing: 2px;
 }
 .settings-sub {
-  font-family: var(--kai); font-size: 11.5px; color: var(--muted);
-  letter-spacing: .5px; margin-bottom: 14px; line-height: 1.6;
+  font-size: 10.5px; color: #8a7a66; letter-spacing: .5px;
+  line-height: 1.6; margin: 4px 0 8px;
 }
+
+/* 通道条目：01/02/03 编号行，选中行盖反白 ACTIVE 章，没选的淡下去 */
 .channel-opt {
-  display: flex; align-items: flex-start; gap: 10px;
-  padding: 12px 10px; border-top: 1px solid var(--line);
+  position: relative;
+  display: flex; align-items: flex-start; gap: 9px;
+  padding: 10px 0; border-top: 1px dashed rgba(58, 48, 38, .22);
   cursor: pointer;
 }
-.channel-opt input { margin-top: 3px; accent-color: var(--accent); }
-.channel-opt input:disabled + .channel-text { opacity: .4; }
-.channel-text { display: flex; flex-direction: column; gap: 3px; font-family: var(--kai); }
-.channel-text b { font-size: 14px; color: var(--ink); font-weight: 600; letter-spacing: 1px; }
-.channel-text small { font-size: 11.5px; color: var(--muted); letter-spacing: .5px; }
-
-/* 外部 API 配置 */
-.ext-group { margin-top: 14px; }
-.ext-field { display: flex; flex-direction: column; gap: 5px; padding: 10px 0; border-top: 1px solid var(--line); }
-.ext-field label { font-family: var(--kai); font-size: 13px; color: var(--ink); letter-spacing: 1px; }
-.ext-field input, .ext-field select {
-  font-size: 13px; padding: 9px 11px; border: 1px solid var(--line); border-radius: 10px;
-  background: transparent; color: var(--ink); outline: none;
-  width: 100%; box-sizing: border-box;
+.channel-opt input { position: absolute; opacity: 0; pointer-events: none; }
+.opt-no { font-size: 11px; color: #6e5f4e; padding-top: 2px; }
+.channel-text { flex: 1; display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.channel-text b { font-size: 13.5px; font-weight: 700; letter-spacing: 1px; }
+.channel-text small { font-size: 10.5px; color: #8a7a66; letter-spacing: .4px; line-height: 1.5; }
+.opt-badge { align-self: center; }
+.opt-badge::after { content: "—"; font-size: 10px; letter-spacing: 1px; color: #b3a48f; }
+.channel-opt input:checked ~ .opt-badge::after {
+  content: "ACTIVE";
+  background: var(--ink); color: #fffdf8;
+  padding: 2px 5px; font-weight: 700;
 }
-.ext-field input:focus, .ext-field select:focus { border-color: var(--accent); }
+.channel-opt input:not(:checked) ~ .channel-text { opacity: .62; }
+.channel-opt input:disabled ~ .channel-text,
+.channel-opt input:disabled ~ .opt-no,
+.channel-opt input:disabled ~ .opt-badge { opacity: .3; }
+
+/* 输入位：小票上的手写补笔，虚线空行 */
+.ext-field { display: flex; flex-direction: column; gap: 4px; padding: 9px 0; }
+.ext-field label { font-size: 11.5px; font-weight: 700; letter-spacing: 1.2px; color: var(--ink); }
+.ext-field input, .ext-field select {
+  font-size: 13px; font-family: var(--mono);
+  padding: 6px 2px; width: 100%; box-sizing: border-box;
+  border: none; border-bottom: 1px dashed rgba(58, 48, 38, .4); border-radius: 0;
+  background: transparent; color: var(--ink); outline: none;
+}
+.ext-field input:focus, .ext-field select:focus { border-bottom-color: var(--accent); border-bottom-style: solid; }
 .ext-refresh {
-  float: right; font-size: 11px; color: var(--accent);
+  float: right; font-size: 10.5px; font-weight: 400; color: var(--accent);
   text-decoration: none; letter-spacing: 1px;
 }
-.ext-field small { font-family: var(--kai); font-size: 11px; color: var(--muted); letter-spacing: .5px; line-height: 1.5; }
+.ext-field small { font-size: 10px; color: #8a7a66; letter-spacing: .4px; line-height: 1.5; }
 .ext-check {
-  display: flex; align-items: flex-start; gap: 10px;
-  padding: 12px 0; border-top: 1px solid var(--line); cursor: pointer;
+  display: flex; align-items: flex-start; gap: 9px;
+  padding: 10px 0; cursor: pointer;
 }
-.ext-check input { margin-top: 3px; accent-color: var(--accent); }
+.ext-check input { margin-top: 2px; accent-color: var(--ink); }
 .ext-save {
-  width: 100%; margin-top: 4px; padding: 10px;
-  font-family: var(--kai); font-size: 14px; letter-spacing: 4px;
+  width: 100%; margin-top: 10px; padding: 11px;
+  font-family: var(--mono); font-size: 13px; font-weight: 700; letter-spacing: 3px;
   color: var(--ink); background: transparent;
-  border: 1px solid var(--line); border-radius: 10px; cursor: pointer;
+  border: 1.5px solid var(--ink); border-radius: 0; cursor: pointer;
 }
-.ext-save:active { background: var(--line); }
+.ext-save:active { background: var(--ink); color: #fffdf8; }
+
+/* 票尾：TOTAL: FOREVER 是彩蛋，按钮老实当按钮 */
+.receipt-total { display: flex; align-items: baseline; gap: 8px; font-size: 13px; letter-spacing: 2px; font-weight: 700; }
+.receipt-thanks { text-align: center; font-size: 10.5px; letter-spacing: 2.5px; margin-top: 14px; color: #6e5f4e; }
+.receipt-barcode {
+  height: 32px; width: 58%; margin: 10px auto 5px; color: var(--ink); opacity: .72;
+  background: repeating-linear-gradient(to right,
+    currentColor 0 1.5px, rgba(0,0,0,0) 1.5px 3px,
+    currentColor 3px 3.8px, rgba(0,0,0,0) 3.8px 6.6px,
+    currentColor 6.6px 8.8px, rgba(0,0,0,0) 8.8px 9.8px,
+    currentColor 9.8px 10.6px, rgba(0,0,0,0) 10.6px 13.4px,
+    currentColor 13.4px 15.2px, rgba(0,0,0,0) 15.2px 17px);
+}
+.receipt-serial { text-align: center; font-size: 9.5px; letter-spacing: 2px; color: #8a7a66; }
 
 /* 聊天里的通道切换提示：跟时间戳一样的居中小字 */
 .chan-note {

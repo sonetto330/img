@@ -85,16 +85,23 @@
     </div>
   </section>
 
-  <!-- 记忆库视图（星图） -->
+  <!-- 记忆库视图（星图）：3D 星空 + 印刷星表排版层 -->
   <section id="memoryView" class="view" hidden>
-    <div class="memory-topbar">
-      <button id="memoryBack" class="memory-back" aria-label="回首页">◀</button>
-      <div class="memory-title">
-        <span>星图</span>
-        <small id="memoryMeta"></small>
-      </div>
-    </div>
     <canvas id="memoryCanvas"></canvas>
+    <div class="star-vignette"></div>
+    <div class="star-frame"></div>
+    <header class="star-head">
+      <div class="star-head-row">
+        <h1 class="star-title">Memory</h1>
+        <span id="memoryMeta" class="star-meta"></span>
+      </div>
+      <div class="star-sub-row">
+        <button id="memoryBack" class="memory-back" aria-label="回首页">◀</button>
+        <p class="star-tagline">Turn the sky. No memory shines alone.</p>
+      </div>
+    </header>
+    <span class="star-axis">KIND / BRIDGE / TIME</span>
+    <span class="star-hint">DRAG TO TURN · PINCH TO ZOOM · TOUCH A STAR</span>
     <div id="memoryEmpty" class="memory-empty" hidden>
       <div class="empty-title">还没有记忆</div>
       <div class="empty-sub">跟麦穗多聊几句关于你日常的事，他会悄悄记下。<br>攒到 10 条以上就会出现在这里。</div>
@@ -186,22 +193,55 @@
   <!-- 工具视图：一格一个玩法，第一格是打电话 -->
   <section id="toolsView" class="view" hidden>
     <div class="page-scroll">
-      <div class="page-title">工 具 <span class="page-en">TOOLS</span></div>
+      <div class="page-title"><span class="page-en">PAGE 04 · TOOLS</span>工具</div>
       <div class="tool-grid">
         <button class="tool-card" id="toolCall">
-          <span class="tool-card-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M22 16.9v3a2 2 0 0 1-2.2 2 19.8 19.8 0 0 1-8.6-3.1 19.5 19.5 0 0 1-6-6A19.8 19.8 0 0 1 2.1 4.2 2 2 0 0 1 4.1 2h3a2 2 0 0 1 2 1.7c.1 1 .4 2 .7 2.9a2 2 0 0 1-.5 2.1L8.1 10a16 16 0 0 0 6 6l1.3-1.3a2 2 0 0 1 2.1-.5c.9.3 1.9.6 2.9.7a2 2 0 0 1 1.7 2z"/></svg></span>
-          <b>打电话</b>
-          <small>听得见的麦穗</small>
+          <span class="ticket">
+          <span class="ticket-main">
+            <span class="ticket-title">
+              <span class="tool-card-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M22 16.9v3a2 2 0 0 1-2.2 2 19.8 19.8 0 0 1-8.6-3.1 19.5 19.5 0 0 1-6-6A19.8 19.8 0 0 1 2.1 4.2 2 2 0 0 1 4.1 2h3a2 2 0 0 1 2 1.7c.1 1 .4 2 .7 2.9a2 2 0 0 1-.5 2.1L8.1 10a16 16 0 0 0 6 6l1.3-1.3a2 2 0 0 1 2.1-.5c.9.3 1.9.6 2.9.7a2 2 0 0 1 1.7 2z"/></svg></span>
+              <b>打电话</b>
+            </span>
+            <small>听得见的麦穗</small>
+            <span class="ticket-meta">No.001 · Valid Forever</span>
+          </span>
+          <span class="ticket-stub">
+            <span class="stub-label">Admit One</span>
+            <span class="stub-barcode"></span>
+          </span>
+          </span>
         </button>
         <button class="tool-card" id="toolGroup">
-          <span class="tool-card-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg></span>
-          <b>议事厅</b>
-          <small>泽 + 麦穗 + GPT</small>
+          <span class="ticket">
+          <span class="ticket-main">
+            <span class="ticket-title">
+              <span class="tool-card-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg></span>
+              <b>议事厅</b>
+            </span>
+            <small>泽 + 麦穗 + GPT</small>
+            <span class="ticket-meta">No.002 · Valid Forever</span>
+          </span>
+          <span class="ticket-stub">
+            <span class="stub-label">Admit Three</span>
+            <span class="stub-barcode"></span>
+          </span>
+          </span>
         </button>
         <div class="tool-card tool-card-soon">
-          <span class="tool-card-icon">✦</span>
-          <b>敬请期待</b>
-          <small>下一个想法放这</small>
+          <span class="ticket">
+          <span class="ticket-main">
+            <span class="ticket-title">
+              <span class="tool-card-icon">✦</span>
+              <b>敬请期待</b>
+            </span>
+            <small>下一个想法放这</small>
+            <span class="ticket-meta">No.003 · Coming Soon</span>
+          </span>
+          <span class="ticket-stub">
+            <span class="stub-label">Not Yet</span>
+            <span class="stub-barcode"></span>
+          </span>
+          </span>
         </div>
       </div>
     </div>
@@ -210,52 +250,85 @@
   <!-- 设置视图 -->
   <section id="settingsView" class="view" hidden>
     <div class="page-scroll">
-      <div class="page-title">设 置 <span class="page-en">SETTINGS</span></div>
-      <div class="settings-group">
-        <div class="settings-head">调用通道</div>
-        <div class="settings-sub" id="channelStatus">读取中…</div>
-        <label class="channel-opt">
-          <input type="radio" name="channel" value="subscription" />
-          <span class="channel-text"><b>订阅</b><small>走 Claude 订阅额度，不额外花钱</small></span>
-        </label>
-        <label class="channel-opt">
-          <input type="radio" name="channel" value="auto" />
-          <span class="channel-text"><b>订阅优先，自动切换</b><small>订阅额度用完自动换外部 API 重试，聊天不断</small></span>
-        </label>
-        <label class="channel-opt">
-          <input type="radio" name="channel" value="api" />
-          <span class="channel-text"><b>外部 API</b><small>直接按量计费，把订阅额度留给别处</small></span>
-        </label>
-      </div>
+      <div class="page-title"><span class="page-en">PAGE 05 · SETTINGS</span>设置</div>
+      <!-- 一张长收银小票：工具页是入场券，这里是收据。折叠区=票面条目，以后加功能就往下加 NO.02… -->
+      <div class="receipt">
+        <div class="receipt-edge" aria-hidden="true"></div>
+        <div class="receipt-paper">
+          <div class="receipt-store">WHEATFIELD<br />GENERAL STORE</div>
+          <div class="receipt-meta">
+            <span>SYSTEM SETTINGS RECEIPT</span>
+            <span>CUSTOMER: ZE</span>
+            <span>DATE: <i id="receiptDate">—</i></span>
+            <span>ADDR: ANTHROPIC CLOUD × PANZHIHUA</span>
+          </div>
+          <div class="receipt-rule" aria-hidden="true"></div>
 
-      <div class="settings-group ext-group">
-        <div class="settings-head">外部 API 配置</div>
-        <div class="settings-sub" id="externalStatus">读取中…</div>
-        <div class="ext-field">
-          <label for="extKey">API key</label>
-          <input type="password" id="extKey" autocomplete="off" placeholder="读取中…" />
-          <small>只存在服务器上，保存后不回显；重新填一遍就是覆盖</small>
+          <details class="receipt-sec">
+            <summary>
+              <span class="sec-no">NO.01</span>
+              <span class="sec-name">调用通道</span>
+              <span class="sec-dots" aria-hidden="true"></span>
+              <span class="sec-val" id="chanSummary">—</span>
+              <span class="sec-arrow" aria-hidden="true">▾</span>
+            </summary>
+            <div class="sec-body">
+              <div class="settings-sub" id="channelStatus">读取中…</div>
+              <label class="channel-opt">
+                <input type="radio" name="channel" value="subscription" />
+                <span class="opt-no">01</span>
+                <span class="channel-text"><b>订阅</b><small>走 Claude 订阅额度，不额外花钱</small></span>
+                <span class="opt-badge" aria-hidden="true"></span>
+              </label>
+              <label class="channel-opt">
+                <input type="radio" name="channel" value="auto" />
+                <span class="opt-no">02</span>
+                <span class="channel-text"><b>订阅优先，自动切换</b><small>订阅额度用完自动换外部 API 重试，聊天不断</small></span>
+                <span class="opt-badge" aria-hidden="true"></span>
+              </label>
+              <label class="channel-opt">
+                <input type="radio" name="channel" value="api" />
+                <span class="opt-no">03</span>
+                <span class="channel-text"><b>外部 API</b><small>直接按量计费，把订阅额度留给别处</small></span>
+                <span class="opt-badge" aria-hidden="true"></span>
+              </label>
+              <div class="receipt-subhead">EXTERNAL API · 外部 API 配置</div>
+              <div class="settings-sub" id="externalStatus">读取中…</div>
+              <div class="ext-field">
+                <label for="extKey">API KEY</label>
+                <input type="password" id="extKey" autocomplete="off" placeholder="读取中…" />
+                <small>只存在服务器上，保存后不回显；重新填一遍就是覆盖</small>
+              </div>
+              <div class="ext-field">
+                <label for="extBaseUrl">中转地址 BASE URL</label>
+                <input type="url" id="extBaseUrl" autocomplete="off" placeholder="https://…（用官方 API 就留空）" />
+                <small>一般填到根地址、不带 /v1 结尾；不通再按中转文档原样填</small>
+              </div>
+              <label class="ext-check">
+                <input type="checkbox" id="extBearer" />
+                <span class="channel-text"><b>这个中转只认 Bearer 验证</b><small>key 确定没错还报 401 时勾上再试</small></span>
+              </label>
+              <div class="ext-field">
+                <label for="extModel">对话用的模型 <a id="extModelRefresh" class="ext-refresh" href="javascript:void 0">拉取列表</a></label>
+                <select id="extModel"><option value="">不指定（原样传，中转认官方名就行）</option></select>
+                <small id="extModelHint">列表从中转站/官方现拉；中转的模型名常跟官方不一样，选一个当外部通道的默认</small>
+              </div>
+              <div class="ext-field">
+                <label for="extHaiku">后台小活用的模型</label>
+                <select id="extHaiku"><option value="">不指定（用官方 Haiku 名）</option></select>
+                <small>问候语 / 记忆提取 / 翻译这些便宜活，挑个中转里最便宜的小模型</small>
+              </div>
+              <button id="extSave" class="ext-save" type="button">保存设置 · SAVE</button>
+            </div>
+          </details>
+
+          <div class="receipt-rule" aria-hidden="true"></div>
+          <div class="receipt-total"><span>TOTAL</span><span class="sec-dots" aria-hidden="true"></span><b>FOREVER</b></div>
+          <div class="receipt-thanks">THANK YOU FOR LIVING HERE</div>
+          <div class="receipt-barcode" aria-hidden="true"></div>
+          <div class="receipt-serial">S/N: LOVE-2025-1224-FOREVER</div>
         </div>
-        <div class="ext-field">
-          <label for="extBaseUrl">中转地址</label>
-          <input type="url" id="extBaseUrl" autocomplete="off" placeholder="https://…（用官方 API 就留空）" />
-          <small>一般填到根地址、不带 /v1 结尾；不通再按中转文档原样填</small>
-        </div>
-        <label class="ext-check">
-          <input type="checkbox" id="extBearer" />
-          <span class="channel-text"><b>这个中转只认 Bearer 验证</b><small>key 确定没错还报 401 时勾上再试</small></span>
-        </label>
-        <div class="ext-field">
-          <label for="extModel">对话用的模型 <a id="extModelRefresh" class="ext-refresh" href="javascript:void 0">拉取列表</a></label>
-          <select id="extModel"><option value="">不指定（原样传，中转认官方名就行）</option></select>
-          <small id="extModelHint">列表从中转站/官方现拉；中转的模型名常跟官方不一样，选一个当外部通道的默认</small>
-        </div>
-        <div class="ext-field">
-          <label for="extHaiku">后台小活用的模型</label>
-          <select id="extHaiku"><option value="">不指定（用官方 Haiku 名）</option></select>
-          <small>问候语 / 记忆提取 / 翻译这些便宜活，挑个中转里最便宜的小模型</small>
-        </div>
-        <button id="extSave" class="ext-save" type="button">保存</button>
+        <div class="receipt-edge receipt-edge-btm" aria-hidden="true"></div>
       </div>
     </div>
   </section>

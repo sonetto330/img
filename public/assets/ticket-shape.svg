@@ -1,0 +1,77 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg"
+     width="840"
+     height="320"
+     viewBox="0 0 840 320"
+     role="img"
+     aria-label="White ticket silhouette with scalloped sides and perforation holes">
+  <title>Ticket shape</title>
+  <desc>Transparent-background white ticket, sized to the existing tools cards.</desc>
+
+  <defs>
+    <!-- White keeps the ticket; black punches out the transparent notches and holes. -->
+    <mask id="ticket-mask"
+          x="0" y="0" width="840" height="320"
+          maskUnits="userSpaceOnUse"
+          maskContentUnits="userSpaceOnUse">
+      <rect x="0" y="0" width="840" height="320" fill="#fff"/>
+
+      <!-- Four large, perfectly round corner cut-outs. -->
+      <g fill="#000">
+        <circle cx="0" cy="0" r="44"/>
+        <circle cx="840" cy="0" r="44"/>
+        <circle cx="0" cy="320" r="44"/>
+        <circle cx="840" cy="320" r="44"/>
+      </g>
+
+      <!-- Even side perforations: identical radius and identical 23 px spacing. -->
+      <g fill="#000">
+        <g>
+          <circle cx="0" cy="54" r="6.5"/>
+          <circle cx="0" cy="77" r="6.5"/>
+          <circle cx="0" cy="100" r="6.5"/>
+          <circle cx="0" cy="123" r="6.5"/>
+          <circle cx="0" cy="146" r="6.5"/>
+          <circle cx="0" cy="169" r="6.5"/>
+          <circle cx="0" cy="192" r="6.5"/>
+          <circle cx="0" cy="215" r="6.5"/>
+          <circle cx="0" cy="238" r="6.5"/>
+          <circle cx="0" cy="261" r="6.5"/>
+        </g>
+        <g>
+          <circle cx="840" cy="54" r="6.5"/>
+          <circle cx="840" cy="77" r="6.5"/>
+          <circle cx="840" cy="100" r="6.5"/>
+          <circle cx="840" cy="123" r="6.5"/>
+          <circle cx="840" cy="146" r="6.5"/>
+          <circle cx="840" cy="169" r="6.5"/>
+          <circle cx="840" cy="192" r="6.5"/>
+          <circle cx="840" cy="215" r="6.5"/>
+          <circle cx="840" cy="238" r="6.5"/>
+          <circle cx="840" cy="261" r="6.5"/>
+        </g>
+      </g>
+
+      <!-- Detachable stub: circular holes, including half-holes at top and bottom. -->
+      <g fill="#000">
+        <circle cx="600" cy="0" r="7.25"/>
+        <circle cx="600" cy="23" r="7.25"/>
+        <circle cx="600" cy="46" r="7.25"/>
+        <circle cx="600" cy="69" r="7.25"/>
+        <circle cx="600" cy="92" r="7.25"/>
+        <circle cx="600" cy="115" r="7.25"/>
+        <circle cx="600" cy="138" r="7.25"/>
+        <circle cx="600" cy="161" r="7.25"/>
+        <circle cx="600" cy="184" r="7.25"/>
+        <circle cx="600" cy="207" r="7.25"/>
+        <circle cx="600" cy="230" r="7.25"/>
+        <circle cx="600" cy="253" r="7.25"/>
+        <circle cx="600" cy="276" r="7.25"/>
+        <circle cx="600" cy="299" r="7.25"/>
+        <circle cx="600" cy="320" r="7.25"/>
+      </g>
+    </mask>
+  </defs>
+
+  <rect x="0" y="0" width="840" height="320" fill="#fff" mask="url(#ticket-mask)"/>
+</svg>

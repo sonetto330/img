@@ -2140,7 +2140,7 @@ async function loadMemoryGraph() {
     window.memoryGraph = graph;
     const n = graph.entities?.length || 0;
     $("memoryMeta").textContent = n
-      ? `${n} 个星座 · ${graph.links.length} 条桥`
+      ? `${n} STARS / ${graph.links.length} BRIDGES`
       : "";
     $("memoryEmpty").hidden = n > 0;
     if (typeof window.attachStarmapGestures === "function") window.attachStarmapGestures();
@@ -2291,6 +2291,18 @@ document.addEventListener("touchend", (e) => {
 }, { passive: false });
 
 // —— 设置页：调用通道 + 外部 API 配置 ——
+// 小票票头日期 + 折叠条目行右侧的当前通道摘要
+const CHANNEL_LABELS = { subscription: "订阅", auto: "订阅优先", api: "外部 API" };
+{
+  const d = new Date(), p = (n) => String(n).padStart(2, "0");
+  const wd = ["SUN", "MON", "TUE", "WED", "THU", "FRI", "SAT"][d.getDay()];
+  $("receiptDate").textContent = `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${wd}`;
+}
+function syncChanSummary() {
+  const cur = settingsViewEl.querySelector("input[name=channel]:checked");
+  $("chanSummary").textContent = cur ? CHANNEL_LABELS[cur.value] : "—";
+}
+
 async function loadChannelSettings() {
   const statusEl = $("channelStatus");
   const extStatusEl = $("externalStatus");
@@ -2301,6 +2313,7 @@ async function loadChannelSettings() {
       // 外部 key 没配就只剩订阅能选
       input.disabled = input.value !== "subscription" && !s.externalConfigured;
     }
+    syncChanSummary();
     statusEl.textContent = s.externalConfigured
       ? `外部 API key 已配置（${s.keySource === "settings" ? "本页保存的" : "服务器 .env 里的"}，尾号 ${s.keyTail}）`
       : "外部 API 还没配置：在下面填好 key 保存，另外两项才能选";
@@ -2365,6 +2378,7 @@ async function postSettings(body) {
 for (const input of settingsViewEl.querySelectorAll("input[name=channel]")) {
   input.onchange = async () => {
     const statusEl = $("channelStatus");
+    syncChanSummary();
     try {
       await postSettings({ channel: input.value });
       statusEl.textContent = "已保存";
