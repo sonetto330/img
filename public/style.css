@@ -21,6 +21,13 @@
   --panel: #fffdf9;
   --ink: #3a3026;
   --muted: #a4917c;
+  /* G老师 2026-07-18 配色四味（戳棕、褪红、鼠尾草、灰玫瑰）：
+     ⚠️只准用在便签左轨/邮戳这些局部小件上。他的 --paper/--ink 全局套色
+     被泽 2026-07-18 红叉否决（背景变深），--bg/--ink 永远保持上面的原值 */
+  --stamp: #A98E81;
+  --faded-red: #8B5150;
+  --sage: #717966;
+  --dusty-rose: #C4939B;
   --accent: #c9673f;
   --accent-soft: #f3e2d3;
   --line: #ece1d0;
@@ -38,22 +45,28 @@
   --prose: ui-serif, Georgia, "Songti SC", "STSong", "SimSun", serif;
 }
 
-html, body { height: 100%; }
+/* iOS standalone PWA 有个 WebKit bug（#237961）：视口尺寸的 position:fixed 容器底部会缺一截。
+   解法：整个 app 只有 body 一个"全屏根"，其余全屏层一律 absolute 挂在它里面——
+   absolute 按父容器算尺寸，不按视口，绕开这个 bug；顶部照样借 viewport-fit=cover 出血到状态栏 */
+html { height: 100%; overflow: hidden; background: var(--bg); }
 
 body {
   font-family: system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
   background: var(--bg);
   color: var(--ink);
-  overflow: hidden;
+  position: relative; height: 100vh; height: 100lvh; overflow: hidden;
   /* 只许上下左右滑，双指缩放和双击放大都不接 */
   touch-action: pan-x pan-y;
 }
 
-/* —— 顶层视图切换 —— */
-.view { position: fixed; inset: 0; }
+/* —— 顶层视图切换：absolute 铺满 body，不用 fixed（见顶部注释） —— */
+.view { position: absolute; inset: 0; }
 .view[hidden] { display: none; }
 
-.chat { display: flex; flex-direction: column; height: 100dvh; overflow: hidden; }
+.chat {
+  /* 高度用 100%（父级 .view 是 absolute inset:0 全屏）：iOS PWA 里 100dvh 会缺底，露一条米白 */
+  display: flex; flex-direction: column; height: 100%; overflow: hidden;
+}
 
 /* —— 顶栏 —— */
 .chat-header {
@@ -137,20 +150,23 @@ body {
   max-width: 100%; overflow: hidden; text-overflow: ellipsis;
   font-size: 12px; color: var(--muted); font-family: var(--kai); letter-spacing: .6px;
 }
-.drawer-model {
-  display: flex; align-items: center; gap: 8px; padding: 10px 14px;
-  border-bottom: 1px solid var(--line); color: var(--muted); font-size: 12px;
+/* 模型切换：圆按钮（对位官方 app 左下角的圆形账号钮），真正的 select 透明叠在上面接点击 */
+.model-orb {
+  position: relative; flex: none;
+  width: 40px; height: 40px; border-radius: 50%;
+  border: 1px solid rgba(196, 178, 152, .55);
+  background: rgba(255, 255, 255, .6);
+  display: flex; align-items: center; justify-content: center;
 }
-.drawer-model span { flex: none; }
-#modelSelect {
-  min-width: 0; flex: 1; border: 1px solid rgba(210, 192, 165, .5); border-radius: 999px;
-  background: rgba(255, 255, 255, .45); color: var(--muted);
-  font: inherit; font-size: 12px; padding: 5px 10px;
-  outline: none; cursor: pointer;
+#modelBadge {
+  font-family: var(--kai); font-size: 16px; color: var(--ink); line-height: 1;
+  pointer-events: none;
+}
+.model-orb #modelSelect {
+  position: absolute; inset: 0; width: 100%; height: 100%;
+  opacity: 0; border: none; cursor: pointer;
   -webkit-appearance: none; appearance: none;
-  overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
 }
-#modelSelect:focus { border-color: var(--accent-soft); color: var(--ink); }
 
 /* —— 消息区 —— */
 .messages {
@@ -585,8 +601,8 @@ footer textarea::placeholder { color: var(--muted); opacity: .75; }
 #sendBtn[hidden], #stopBtn[hidden] { display: none; }
 
 .to-bottom {
-  position: fixed; left: 50%; transform: translateX(-50%);
-  /* 锚在输入区上沿：输入区长高（多行/附件条）时跟着让位 */
+  position: absolute; left: 50%; transform: translateX(-50%);
+  /* 锚在输入区上沿（相对全屏 .view 的底边）：输入区长高时跟着让位 */
   bottom: calc(var(--composer-h, 78px) + 10px);
   width: 40px; height: 40px; border-radius: 50%; z-index: 10;
   background: rgba(255,253,249,.82);
@@ -606,7 +622,7 @@ footer textarea::placeholder { color: var(--muted); opacity: .75; }
 .to-bottom .badge[hidden] { display: none; }
 
 .image-viewer {
-  position: fixed; inset: 0; z-index: 80; padding: max(48px, env(safe-area-inset-top)) 16px max(24px, env(safe-area-inset-bottom));
+  position: absolute; inset: 0; z-index: 80; padding: max(48px, env(safe-area-inset-top)) 16px max(24px, env(safe-area-inset-bottom));
   display: grid; place-items: center; background: rgba(24,20,17,.9);
 }
 .image-viewer[hidden] { display: none; }
@@ -617,58 +633,79 @@ footer textarea::placeholder { color: var(--muted); opacity: .75; }
   background: rgba(0,0,0,.25); color: #fff; font: 24px/1 system-ui; cursor: pointer;
 }
 
-/* —— 会话抽屉 —— */
+/* —— 会话抽屉：对标官方 app 侧栏——字标在顶、纯文字条目、分组小灰字、底栏胶囊 —— */
 .drawer {
-  position: fixed; top: 0; left: 0; bottom: 0; width: min(78vw, 300px);
-  background: var(--panel); border-right: 1px solid var(--line);
-  transform: translateX(-100%); transition: transform .2s ease; z-index: 20;
+  position: absolute; top: 0; left: 0; bottom: 0; width: min(78vw, 300px);
+  background: #f4f0e7;
+  transform: translateX(-100%); transition: transform .3s cubic-bezier(.32, .72, .33, 1); z-index: 20;
   display: flex; flex-direction: column;
   padding-top: env(safe-area-inset-top);
 }
 .drawer.open { transform: translateX(0); }
-.drawer-head {
-  display: flex; justify-content: space-between; align-items: center;
-  padding: 14px; border-bottom: 1px solid var(--line); font-weight: 600;
+.drawer-head { padding: 20px 22px 6px; }
+.drawer-logo {
+  font-family: var(--kai); font-size: 23px; color: var(--ink);
+  letter-spacing: 5px; line-height: 1;
 }
-.drawer-head-btns { display: flex; gap: 6px; }
-.drawer-head button {
-  border: 1px solid var(--line); background: var(--bg); border-radius: 8px;
-  padding: 4px 10px; cursor: pointer; font-size: 13px; color: var(--ink);
+.drawer ul {
+  list-style: none; overflow-y: auto; flex: 1; padding: 4px 0 10px;
+  scrollbar-width: none;
 }
-.drawer ul { list-style: none; overflow-y: auto; flex: 1; }
+.drawer ul::-webkit-scrollbar { display: none; }
+/* 分组标题：官方 Starred / Recents 那种小灰字 */
+.drawer li.sess-section {
+  padding: 18px 22px 7px; cursor: default;
+  font-size: 12px; color: var(--muted); letter-spacing: 1px;
+}
 .drawer li {
-  position: relative; padding: 12px 14px; border-bottom: 1px solid var(--line);
-  cursor: pointer; font-size: 14px;
+  position: relative; margin: 0 10px; padding: 9px 12px;
+  border-radius: 10px; cursor: pointer; font-size: 14px; color: var(--ink);
   display: flex; align-items: center; gap: 8px;
 }
-.drawer li.active { background: var(--bg); border-left: 3px solid var(--accent); }
+.drawer li.sess-section { margin: 0; border-radius: 0; }
+.drawer li.active { background: rgba(58, 48, 38, .08); }
+@media (hover: hover) {
+  .drawer li:not(.sess-section):hover { background: rgba(58, 48, 38, .05); }
+  .drawer li.active:hover { background: rgba(58, 48, 38, .08); }
+}
 .drawer li .sess-info { flex: 1; overflow: hidden; }
 .drawer li .sess-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .sess-tag {
   display: inline-block; margin-left: 6px; padding: 1px 6px;
   font-size: 10px; color: var(--muted);
-  background: var(--bg); border: 1px solid var(--line); border-radius: 8px;
+  border: 1px solid rgba(164, 145, 124, .4); border-radius: 8px;
   vertical-align: 1px;
 }
-.drawer li time { display: block; font-size: 11px; color: var(--muted); margin-top: 2px; }
+/* 三点菜单：常驻但压得很淡，不跟标题抢眼 */
 .drawer li .sess-more {
-  flex: none; border: none; background: none; color: var(--muted);
-  font-size: 20px; line-height: 1; padding: 4px 8px; cursor: pointer; border-radius: 6px;
+  flex: none; border: none; background: none; color: rgba(164, 145, 124, .55);
+  font-size: 18px; line-height: 1; padding: 4px 6px; margin-right: -4px;
+  cursor: pointer; border-radius: 6px;
 }
-.drawer li .sess-more:hover, .drawer li .sess-more:active { background: var(--bg); color: var(--ink); }
+.drawer li .sess-more:hover, .drawer li .sess-more:active { background: rgba(58, 48, 38, .06); color: var(--ink); }
 /* 文件夹行：点击开合，箭头 + 名字 + 计数 */
-.drawer li.folder-row { font-family: var(--kai); letter-spacing: 1px; }
-.folder-arrow { flex: none; width: 14px; color: var(--muted); font-size: 12px; }
+.drawer li.folder-row { color: var(--ink); }
+.folder-arrow { flex: none; width: 13px; color: var(--muted); font-size: 11px; }
 .folder-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.folder-count {
-  flex: none; font-size: 11px; color: var(--muted);
-  background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 1px 7px;
-}
+.folder-count { flex: none; font-size: 11.5px; color: var(--muted); }
 /* 文件夹里的会话行往里缩一点，看得出层级 */
-.drawer li.in-folder { padding-left: 34px; }
+.drawer li.in-folder { padding-left: 33px; }
+/* 底栏：模型胶囊 + 新会话主按钮，对位官方的 头像 + New chat */
+.drawer-foot {
+  flex: none; display: flex; align-items: center; gap: 10px;
+  padding: 12px 14px calc(14px + env(safe-area-inset-bottom));
+}
+.drawer-foot #newChat {
+  flex: none; margin-left: auto; height: 40px; padding: 0 24px;
+  border: none; border-radius: 999px; cursor: pointer;
+  background: var(--ink); color: #f9f6f0;
+  font-family: inherit; font-size: 14px; letter-spacing: 2px;
+  white-space: nowrap;
+}
+.drawer-foot #newChat:active { background: #2c241c; }
 
 .sess-menu {
-  position: absolute; top: 44px; right: 10px; z-index: 30;
+  position: absolute; top: 36px; right: 8px; z-index: 30;
   background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
   box-shadow: 0 4px 14px rgba(60, 40, 20, .14);
   display: flex; flex-direction: column; min-width: 92px; overflow: hidden;
@@ -680,32 +717,37 @@ footer textarea::placeholder { color: var(--muted); opacity: .75; }
 .sess-menu button:hover { background: var(--bg); }
 .sess-menu button.danger { color: #b64525; }
 
+/* 遮罩压在整个主界面上（含抬头，z 高过 header 的 10）、抽屉之下 */
 .mask {
-  position: fixed; inset: 0; background: rgba(0,0,0,.25); z-index: 10;
-  opacity: 0; pointer-events: none; transition: opacity .2s;
+  position: absolute; inset: 0;
+  background: rgba(31, 24, 17, .18); z-index: 15;
+  opacity: 0; pointer-events: none; transition: opacity .3s;
 }
 .mask.show { opacity: 1; pointer-events: auto; }
 
 /* —— 首页 —— */
 #homeView { background: var(--bg); }
 .home-scroll {
-  height: 100dvh; overflow-y: auto;
+  height: 100%; overflow-y: auto;
   /* 狐狸和便签故意出血到屏幕外，这里锁死横向，免得误触整页乱晃 */
   overflow-x: hidden;
   overscroll-behavior-x: none;
   padding:
     calc(28px + env(safe-area-inset-top))
     max(22px, calc((100% - 500px) / 2))
-    calc(88px + env(safe-area-inset-bottom));
+    calc(104px + env(safe-area-inset-bottom));
 }
 .home-top {
   display: flex; justify-content: space-between; align-items: flex-start;
   margin-bottom: 22px;
+  /* 坐标小字挂在这个盒子右下，不占流、不推挤下面的狐狸 */
+  position: relative;
 }
 /* 「麦田。」大标题，对标参考图的「续。」 */
 .home-title {
   font-family: var(--kai);
-  font-size: 38px; color: var(--ink);
+  /* 比 --ink 再深一档：粉灰素材糊在一起时，靠标题和大数字把画面压住 */
+  font-size: 38px; color: #2b241d;
   letter-spacing: 8px; line-height: 1;
 }
 .home-title i { font-style: normal; }
@@ -732,6 +774,7 @@ footer textarea::placeholder { color: var(--muted); opacity: .75; }
 /* —— 主视觉：狐狸伏在天数后面，敢压字，拼贴不排队 —— */
 .hero { position: relative; margin-bottom: 0; min-height: 350px; }
 .hero-fox {
+  /* 泽拍板：狐狸就是主角，回原来的大小横铺，字给图让路 */
   position: absolute; right: -20%; top: -96px;
   width: 128%; max-width: 540px;
   /* 压在便签(z2)上面、天数文字(z4)下面：狐狸盖便签顶边，不盖字 */
@@ -739,12 +782,15 @@ footer textarea::placeholder { color: var(--muted); opacity: .75; }
   opacity: .96;
 }
 .hero-text { position: relative; z-index: 4; padding-top: 14px; }
-/* 角落的经纬度小字：攀枝花 + 杭州。纸色柔光衬底，叠在花上也能读 */
+/* 角落的经纬度小字：攀枝花 + 杭州。
+   试过挂天气下方——那儿花瓣更密。这张图真正的留白在狐狸头上方的花藤间隙，
+   就贴着原位往下顺一点，四行全落进间隙 */
 .hero-coords {
-  position: absolute; right: 30%; top: -46px; z-index: 5;
+  position: absolute; right: 30%; top: -30px; z-index: 5;
   text-align: right;
   font-family: "Canela", Georgia, serif;
-  font-size: 9.5px; letter-spacing: 1.2px; color: var(--muted);
+  /* G老师配色：坐标住在花藤叶子间隙里，鼠尾草绿跟叶同族，比暖棕更贴 */
+  font-size: 9.5px; letter-spacing: 1.2px; color: var(--sage);
   line-height: 1.55; opacity: .85;
   text-shadow: 0 0 3px var(--bg), 0 0 6px var(--bg), 0 0 10px var(--bg);
 }
@@ -761,7 +807,7 @@ footer textarea::placeholder { color: var(--muted); opacity: .75; }
 .together-days { line-height: .9; }
 .together-days .num {
   font-family: "Canela", Georgia, serif;
-  font-size: 104px; font-weight: 100; color: var(--ink);
+  font-size: 104px; font-weight: 100; color: #2b241d;
   letter-spacing: 2px;
 }
 .days-word {
@@ -771,24 +817,34 @@ footer textarea::placeholder { color: var(--muted); opacity: .75; }
 }
 .since-sub {
   font-family: "Canela", Georgia, serif; font-style: italic;
-  font-size: 12.5px; letter-spacing: 1.5px; color: var(--muted);
-  border-top: 1px solid var(--line); padding-top: 10px;
+  font-size: 12.5px; letter-spacing: 1.5px; color: #6f6257;
   width: fit-content;
-  /* 这两行躺在狐狸尾巴上，垫一圈纸色光晕保住可读性 */
+  /* G老师定稿：窄块紧跟 days，整根文字轴一气呵成，块结束尾巴才起来——
+     字全住左上净土，中下整片让给狐狸。长横线删了，缩成一小截刻度 */
+  margin-top: 10px; padding-top: 12px;
+  position: relative;
   text-shadow: 0 0 3px var(--bg), 0 0 6px var(--bg), 0 0 10px var(--bg);
 }
+.since-sub::before {
+  content: ""; position: absolute; top: 0; left: 2px;
+  /* 泽：刻度线加深。落 G老师的褪红——老印刷刻度线那个色，深度够还带一点旧 */
+  width: 34px; height: 1px; background: var(--faded-red);
+}
 .since-sub2 {
-  font-family: var(--kai); font-size: 12px; color: var(--muted);
-  letter-spacing: 1px; margin-top: 6px;
+  font-family: var(--kai); font-size: 12px; color: #6f6257;
+  letter-spacing: 1px; margin-top: 6px; line-height: 1.75;
   text-shadow: 0 0 3px var(--bg), 0 0 6px var(--bg), 0 0 10px var(--bg);
 }
 
 /* —— 每日留言条：垫在泽找的便签纸素材上，顶边塞到狐狸下面一点 ——
    上提量跟屏宽联动：狐狸实画高度≈128%宽×89%（图底约11%透明），
    目标是尾巴压住纸顶边约16px、离第一行字还有一指宽，各种手机都成立。
+   公式 = fox顶(-96) + 128%×.89 - 压边16 - hero高350。
    依赖 .hero 的 min-height:350px，改那边记得同步这里的常数 */
 .note-wrap {
-  display: flex; gap: 4px; align-items: stretch;
+  /* flex-start 别改回 stretch：stretch 会让左轨内容撑高 note-card，
+     aspect-ratio 一废，便签图悬空、note-inner 百分比全错位 */
+  display: flex; gap: 4px; align-items: flex-start;
   margin: calc(112.8% - 462px) -6px 24px 0;
   position: relative; z-index: 2;
 }
@@ -801,30 +857,77 @@ footer textarea::placeholder { color: var(--muted); opacity: .75; }
   display: flex; flex-direction: column; align-items: center; gap: 8px;
   padding-top: 16%;
 }
-.note-clover { color: var(--muted); font-size: 11px; opacity: .8; }
+/* 左轨换 G老师配色：❀ 灰玫瑰、✧ 戳棕、竖排字戳棕——整条左轨归入邮政线色系 */
+.note-clover { color: var(--dusty-rose); font-size: 11px; opacity: .8; }
+.note-clover.c2 { color: var(--stamp); }
 .note-side-line { width: 1px; height: 22px; background: var(--line); }
 .note-side-text {
   writing-mode: vertical-rl;
   font-family: "Canela", Georgia, serif;
-  font-size: 9.5px; letter-spacing: 3.5px; color: var(--muted);
+  font-size: 9.5px; letter-spacing: 3.5px; color: var(--stamp);
 }
+/* 左轨下半段：短线+星收尾。1224 编号不重写——G老师的戳上已经印着 LOVE-2025-1224 */
+.note-side-line.l2 { height: 28px; opacity: .7; }
+.note-clover.c2 { font-size: 9px; opacity: .55; }
 .note-card {
   position: relative; flex: 1;
-  max-width: 420px;
+  /* 泽拍板：便签缩一点、靠右贴；右缘留一口气不顶死 */
+  max-width: 315px;
+  margin-left: auto; margin-right: 10px;
   aspect-ratio: 1632 / 1258;
-  background: url("assets/notepaper.webp") no-repeat center / contain;
+  /* 泽改的新图：去掉了左边突出的报纸撮，画布尺寸没变 */
+  background: url("assets/notepaper2.png") no-repeat center / contain;
+}
+/* 565 SVG 戳已删——泽 2026-07-18 红叉判死刑，跟主数字 565 信息重复。G老师的戳独苗做主角 */
+/* 航空邮件竖排小字：泽 2026-07-18 17:53 定稿——横排三行（TO/FROM/✦线）否了
+   （"我看了，横排不好看"），换竖排 PAR AVION ✈，摆白纸左侧那条竖缝里、戳正上方。
+   竖缝形状本来就是窄长条，竖排才贴形。颜色归左轨戳棕。就这一条，别再塞 */
+.note-envelope {
+  position: absolute; left: 21px; top: 38px; z-index: 1;
+  /* left 21 = 竖字中轴 ≈27.9px 对齐下方邮戳可见圆左缘，上下一条竖轴。
+     top 38 = 字尾贴到戳可见圆顶留 ~7px（实测字高77.6）——泽 17:59"位置大小奇怪"：
+     旧版 8.5px/top16 又小又两头不靠地飘在半空，改成字+戳咬合成一个邮政单元 */
+  writing-mode: vertical-rl;  /* 字母书脊式横倒，从上往下读 */
+  font-family: "Canela", Georgia, serif;
+  font-size: 10.5px; letter-spacing: 3px; color: var(--stamp);
+  pointer-events: none;
+}
+
+/* G老师画的麦田邮局戳：白底靠 multiply 消掉，骑在白纸左下角。
+   角度/淡度按 G老师参数（-8° / .42）。三次返工的教训全在这，别再犯：
+   ① 图是 1200 方图，可见圆只占 84.5%（canvas 实测），四周 7.7% 透明边——
+      G老师的 84px 说的是圆，盒宽要 84/0.845≈96 才够（泽 17:21 骂"戳小了"）。
+   ② 定位锚白纸边线，不锚图边线：notepaper2.png 白纸左缘在图宽 18%、
+      底缘在图高 82%，下面 18% 全是报纸撕边（曾贴图底定位掉进报纸，红叉一次）。
+   ③ 落点以泽认可的 15:54 版为基准再"往左一部分"：戳心在白纸左缘内 12px、
+      白纸底线上 28px，可见圆 1/3 探出左缘、底缘擦报纸顶。
+      曾移过头把心悬到纸外（17:21 红叉二次）。下方 calc = 白纸边线 ± 上述落点 - 盒半径48 */
+.note-stamp2 {
+  position: absolute;
+  left: calc(18% - 37px);   /* 戳心=白纸左缘内16px（盒半径53）。泽17:38夹逼定稿：
+                               G老师版心内20太靠内、麦穗版心内12太靠外，取16 */
+  bottom: calc(18% - 21px); /* 戳心=白纸底线上32px，撕边左段冒头高，多留2px */
+  z-index: 2;
+  width: 106px; height: auto; /* 可见圆89.6px，泽17:38"再放大一点点"定的 */
+  transform: rotate(-8deg);
+  /* G老师原参 .42 被泽 17:28 否了（"颜色浅了"）：实机 multiply 在米白底上
+     压不出他效果图的墨浓度，外环虚线糊没、戳观感缩一圈。.60 按泽认可的
+     15:54 版浓度校的。改浓淡只动这一个数，别去碰混合模式 */
+  mix-blend-mode: multiply; opacity: .6;
+  pointer-events: none;
 }
 .note-inner {
   position: absolute; left: 25%; top: 13%; right: 30%; bottom: 28%;
   display: flex; flex-direction: column; justify-content: space-between;
 }
 .note-text {
-  font-family: var(--kai); font-size: 14.5px; line-height: 2.15;
-  color: var(--ink); overflow: hidden;
+  /* G老师：太黑太重像通知书。降到深咖、行距稍收，更像手记 */
+  font-family: var(--kai); font-size: 13.5px; line-height: 1.95;
+  color: #6b5a48; overflow: hidden;
 }
 .note-meta {
   display: flex; justify-content: space-between; align-items: baseline;
-  font-family: var(--kai); font-size: 11px; color: var(--muted);
+  font-family: var(--kai); font-size: 10.5px; color: var(--muted);
   letter-spacing: 1px;
 }
 .note-meta span:last-child { font-family: "Canela", Georgia, serif; letter-spacing: 2px; }
@@ -972,55 +1075,67 @@ footer textarea::placeholder { color: var(--muted); opacity: .75; }
 }
 
 /* —— 底部导航：线条图标，爱心居中悬浮 —— */
+/* —— 底部导航：毛玻璃浮岛（iOS 快捷指令那味），选中底片由 app.js 滑动 —— */
 .bottom-nav {
-  position: fixed; left: 0; right: 0; bottom: 0; z-index: 5;
-  background: rgba(249, 246, 240, .92);
-  -webkit-backdrop-filter: blur(12px); backdrop-filter: blur(12px);
-  border-top: none;
-  padding-bottom: env(safe-area-inset-bottom);
+  position: absolute; z-index: 5;
+  left: 50%; transform: translateX(-50%);
+  bottom: calc(14px + env(safe-area-inset-bottom));
+  width: min(calc(100% - 32px), 400px);
   display: flex;
-}
-.bottom-nav::before {
-  content: ""; position: absolute; left: 6%; right: 6%; top: 0; height: 1px;
-  background: linear-gradient(90deg, transparent, rgba(93, 68, 42, .14) 30%, rgba(93, 68, 42, .14) 70%, transparent);
+  padding: 5px;
+  border-radius: 999px;
+  background: rgba(252, 249, 243, .68);
+  /* blur 别超 14px：再糊就把纸面拼贴感吃掉了 */
+  -webkit-backdrop-filter: blur(14px) saturate(1.5);
+  backdrop-filter: blur(14px) saturate(1.5);
+  border: 1px solid rgba(255, 255, 255, .65);
+  box-shadow: 0 8px 28px rgba(60, 40, 20, .13), 0 1px 3px rgba(60, 40, 20, .05);
 }
 .bottom-nav[hidden] { display: none; }
+/* 选中格底片：一整片暖棕，切换时整体滑过去 */
+.nav-pill {
+  position: absolute; top: 5px; bottom: 5px; left: 0;
+  width: 0; border-radius: 999px;
+  background: rgba(141, 103, 72, .1);
+  transition: transform .34s cubic-bezier(.3, 1.3, .4, 1), width .34s cubic-bezier(.3, 1.3, .4, 1);
+  will-change: transform;
+}
 .nav-btn {
   flex: 1; border: none; background: none;
-  display: flex; flex-direction: column; align-items: center; justify-content: flex-end;
-  gap: 4px; padding: 9px 0 7px;
+  position: relative; z-index: 1;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 3px; padding: 7px 0 6px;
   color: #b7a996;
   cursor: pointer;
   font: inherit;
   touch-action: manipulation;
+  transition: color .25s;
 }
 .nav-btn.active { color: var(--name); }
 .nav-btn:disabled { opacity: .4; cursor: not-allowed; }
-.nav-icon { display: inline-flex; }
+.nav-btn:active .nav-icon { transform: scale(.9); }
+.nav-icon { display: inline-flex; transition: transform .12s; }
 .nav-icon svg { width: 21px; height: 21px; }
 .nav-label { font-size: 10px; font-family: var(--kai); letter-spacing: 1.5px; }
-/* 中间的爱心：白圆悬浮，高出栏面，压在发丝线上面 */
-.nav-heart { justify-content: flex-start; overflow: visible; position: relative; z-index: 1; }
-.heart-circle {
-  width: 64px; height: 64px; border-radius: 50%;
-  background: #fff;
-  border: 1px solid rgba(210, 192, 165, .55);
-  box-shadow: 0 4px 16px rgba(60, 40, 20, .12);
-  display: grid; place-items: center;
-  margin-top: -32px;
-  transition: transform .12s;
+/* 中间的爱心：收进岛里跟大家一排，只比别人大一号，粉色只留给它 */
+.nav-heart .nav-icon svg {
+  width: 25px; height: 25px;
+  color: var(--name);
+  fill: rgba(217, 143, 135, .28);
+  transition: fill .25s;
 }
-.nav-heart:active .heart-circle { transform: scale(.94); }
-.heart-circle svg { width: 27px; height: 27px; color: var(--name); }
-.nav-heart.active .heart-circle svg { color: var(--accent); fill: rgba(201, 103, 63, .12); }
+.nav-heart.active .nav-icon svg {
+  color: var(--accent);
+  fill: rgba(217, 143, 135, .5);
+}
 
 /* —— 工具页 / 设置页：跟首页一个纸面气质 —— */
 .page-scroll {
-  height: 100dvh; overflow-y: auto;
+  height: 100%; overflow-y: auto;
   padding:
     calc(28px + env(safe-area-inset-top))
     max(22px, calc((100% - 500px) / 2))
-    calc(88px + env(safe-area-inset-bottom));
+    calc(104px + env(safe-area-inset-bottom));
 }
 .page-title {
   font-family: var(--kai); font-size: 30px; color: var(--ink);
@@ -1107,7 +1222,7 @@ footer textarea::placeholder { color: var(--muted); opacity: .75; }
 
 /* —— 通话界面：全屏纸面，像一通真的电话 —— */
 .call-overlay {
-  position: fixed; inset: 0; z-index: 60;
+  position: absolute; inset: 0; z-index: 60;
   background: var(--bg);
   display: flex; flex-direction: column; align-items: center;
   padding:

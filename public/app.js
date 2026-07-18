@@ -42,6 +42,7 @@ let turnToolName = null;
 let turnLastProgressAt = null;
 let turnStatusSpeaker = null;
 let pendingAssistantGroup = null;
+let turnSplit = false; // 这一轮的正文被思考/工具切成过多段：done 时不能再拿全量文本盖最后一段
 let renderingHistory = false;
 let unreadCount = 0;
 const pendingSends = [];
@@ -55,6 +56,9 @@ function selectedModelLabel() {
 function setHeaderStatus(text) {
   statusTextEl.dataset.state = text;
   statusTextEl.textContent = chatArea === "group" ? text : `${text} · ${selectedModelLabel()}`;
+  // 抽屉底栏的圆钮：显示当前模型的首字母
+  const badge = $("modelBadge");
+  if (badge) badge.textContent = selectedModelLabel().slice(0, 1).toUpperCase();
 }
 
 function setChatTitle() {
@@ -147,6 +151,16 @@ function connect() {
   };
 }
 
+// 正在写的字先定稿，让后到的思考/工具块按真实时序排在它后面，
+// 之后再来的字另起一个气泡——"说话→干活→接着说"在页面上就是三段，不再压平
+function sealLiveBubble() {
+  if (!liveBubble) return;
+  renderMd(liveBubble, bubbleRawText.get(liveBubble) || "");
+  liveBubble = null;
+  liveTools = null; // 后面的工具串另开一组，别并进文字前面那组
+  turnSplit = true;
+}
+
 function handle(msg) {
   if (msg.type !== "session" && msg.sessionId && sessionId && msg.sessionId !== sessionId) return;
   switch (msg.type) {
@@ -174,6 +188,7 @@ function handle(msg) {
       break;
     case "thinking":
       hideTyping();
+      if (msg.speaker !== "gpt") sealLiveBubble(); // 说到一半又开始想：文字先收口，思考卡排在后面
       if (!liveThinking) {
         maybeStamp();
         ensureTaHead();
@@ -183,6 +198,7 @@ function handle(msg) {
       break;
     case "thinking_done":
       liveThinking?.finish(msg.ms);
+      liveThinking = null; // 这段想完了；之后再想是新的一段，另开卡
       break;
     case "delta":
       hideTyping();
@@ -210,6 +226,7 @@ function handle(msg) {
       break;
     case "tool": {
       hideTyping();
+      sealLiveBubble(); // 说完一段去干活：文字定稿，工具栏按时序排在它后面
       if (!liveTools) {
         ensureTaHead();
         liveTools = newToolbox();
@@ -239,8 +256,9 @@ function handle(msg) {
         break;
       }
       let bubble = liveBubble;
-      if (bubble) renderMd(bubble, msg.text || bubbleRawText.get(bubble) || "");
-      else if (msg.text) {
+      // 拆过段的轮：msg.text 是整轮全量文本，塞给最后一段会重复，只用这段自己攒的字
+      if (bubble) renderMd(bubble, turnSplit ? (bubbleRawText.get(bubble) || "") : (msg.text || bubbleRawText.get(bubble) || ""));
+      else if (msg.text && !turnSplit) {
         maybeStamp();
         if (msg.speaker === "gpt") {
           if (!gptHeadEl) gptHeadEl = addTaHead(undefined, "GPT");
@@ -254,7 +272,9 @@ function handle(msg) {
       if (msg.interrupted && bubble) addHalfMark(bubble, msg.incompleteReason);
       // 正文零字就被掐（只有思考/工具）：没气泡，标记挂到本轮的组上
       else if (msg.interrupted && pendingAssistantGroup?.isConnected) addHalfMark(pendingAssistantGroup, msg.incompleteReason);
-      if (bubble && msg.usage) addUsage(bubble, msg.usage);
+      // 拆段轮的尾巴可能是工具（没有 live 气泡）：usage 挂到组里最后一段文字上
+      const usageBubble = bubble || pendingAssistantGroup?.querySelector(":scope > .msg.ta:last-of-type");
+      if (usageBubble && msg.usage) addUsage(usageBubble, msg.usage);
       finishTurn();
       loadSessions();
       break;
@@ -314,6 +334,17 @@ function clearGptIndicator() {
 }
 
 function restoreTurnSnapshot(msg) {
+  // 这轮已经拆过段：快照给的是全量半截文本，塞回单气泡会跟页面上拆出的旧段重复。
+  // 整组撤掉重画（代价是这轮的实时步骤清单没了，刷新/重进会话会回来）
+  if (turnSplit) {
+    pendingAssistantGroup?.remove();
+    pendingAssistantGroup = null;
+    liveBubble = null;
+    liveTools = null;
+    liveThinking = null;
+    liveHead = false;
+    turnSplit = false;
+  }
   applyTurnStatus({
     state: msg.status,
     toolName: msg.toolName,
@@ -367,6 +398,7 @@ function finishTurn() {
   liveSpeaker = null;
   gptHeadEl = null;
   pendingAssistantGroup = null;
+  turnSplit = false;
   hideTyping();
   dotEl.classList.remove("busy");
   setHeaderStatus(connectionLost ? "已断线，重连中…" : "在线");
@@ -1096,7 +1128,7 @@ function addBubble(kind, text) {
     else addRerunButton(div, actions);
     addDeleteButton(div, actions);
     group.append(div, actions);
-    if (kind !== "me") pendingAssistantGroup = null;
+    // 组不在这里清：一轮里可能"字→工具→字"进出多次，组活到 finishTurn / 下一个 addTaHead
   }
   if (!renderingHistory && !stickToBottom && kind !== "me") noteUnread();
   scrollDown();
@@ -1104,7 +1136,10 @@ function addBubble(kind, text) {
 }
 
 function addUsage(bubble, usage) {
-  const actions = bubble?.closest(".msg-group")?.querySelector(":scope > .msg-actions");
+  // 拆段后一组里有多个操作行：优先挂在这个气泡自己紧邻的那行上
+  let actions = bubble?.nextElementSibling;
+  if (!actions?.classList?.contains("msg-actions"))
+    actions = bubble?.closest(".msg-group")?.querySelector(":scope > .msg-actions");
   if (!actions || actions.querySelector(".tokens")) return;
   const tokens = Number(usage?.tokens);
   const cache = Number(usage?.cache);
@@ -1125,7 +1160,9 @@ function addHalfMark(bubble, reason = "interrupted") {
   const mark = document.createElement("div");
   mark.className = "half-mark";
   mark.textContent = reason === "error" ? "这轮没说完就断了" : "这轮说到一半被打断";
-  group.insertBefore(mark, group.querySelector(".msg-actions"));
+  // 拆段后组里有多个操作行：标记插在最后一段的气泡和它的操作行之间
+  const actionRows = group.querySelectorAll(":scope > .msg-actions");
+  group.insertBefore(mark, actionRows[actionRows.length - 1] || null);
 }
 
 // 你翻上去看历史时别打扰你：只有原本就贴底才跟着新消息滚。
@@ -1653,8 +1690,17 @@ function renderSessions() {
     if (!folders.has(s.folder)) folders.set(s.folder, []);
     folders.get(s.folder).push(s);
   }
+  // 官方式分组标题：小灰字，不可点
+  const sectionRow = (text) => {
+    const li = document.createElement("li");
+    li.className = "sess-section";
+    li.textContent = text;
+    return li;
+  };
+  if (loose.length) listEl.appendChild(sectionRow("最近"));
   for (const s of loose) listEl.appendChild(sessionRow(s));
   const open = collapsedFolders();
+  if (folders.size) listEl.appendChild(sectionRow("收纳"));
   for (const [name, items] of [...folders.entries()].sort((a, b) => a[0].localeCompare(b[0], "zh-CN"))) {
     const li = document.createElement("li");
     li.className = "folder-row";
@@ -1664,7 +1710,7 @@ function renderSessions() {
     arrow.textContent = isOpen ? "▾" : "▸";
     const label = document.createElement("span");
     label.className = "folder-name";
-    label.textContent = `📁 ${name}`;
+    label.textContent = name;
     const count = document.createElement("span");
     count.className = "folder-count";
     count.textContent = items.length;
@@ -1697,9 +1743,8 @@ function sessionRow(s) {
     tag.textContent = "技术";
     title.appendChild(tag);
   }
-  const t = document.createElement("time");
-  t.textContent = new Date(s.updatedAt).toLocaleString("zh-CN");
-  info.append(title, t);
+  // 官方式条目只留标题一行，时间戳不上墙（要看时间进会话看时间戳条）
+  info.append(title);
   li.appendChild(info);
 
   const more = document.createElement("button");
@@ -1973,7 +2018,7 @@ function updateAreaLabels() {
   chatEl.classList.toggle("solo-mode", !group);
   setChatTitle(group ? "议事厅" : "麦穗");
   setHeaderStatus(statusTextEl.dataset.state || "在线");
-  $("drawerTitle").textContent = group ? "议事厅" : "会话";
+  $("drawerTitle").textContent = group ? "议事厅" : "麦田";
 }
 
 async function enterChatArea(area) {
@@ -2041,6 +2086,7 @@ function showView(name) {
   for (const btn of bottomNavEl.querySelectorAll(".nav-btn")) {
     btn.classList.toggle("active", btn.dataset.view === name);
   }
+  moveNavPill();
   if (name === "home") updateGreeting();
   if (name === "memory") loadMemoryGraph();
   if (name === "settings") loadChannelSettings();
@@ -2050,6 +2096,19 @@ function showView(name) {
     requestAnimationFrame(() => requestAnimationFrame(forceScrollDown));
   }
 }
+
+// 浮岛里的选中底片：滑到当前 active 格的位置（导航隐藏时量不到宽度，跳过）
+const navPillEl = $("navPill");
+function moveNavPill() {
+  if (!navPillEl || bottomNavEl.hidden) return;
+  const active = bottomNavEl.querySelector(".nav-btn.active");
+  if (!active) return;
+  navPillEl.style.width = `${active.offsetWidth}px`;
+  navPillEl.style.transform = `translateX(${active.offsetLeft}px)`;
+}
+window.addEventListener("resize", moveNavPill);
+// 首次进来底片直接就位，不要从左边 0 飘过来
+requestAnimationFrame(moveNavPill);
 
 for (const btn of bottomNavEl.querySelectorAll(".nav-btn")) {
   btn.onclick = () => {
@@ -2492,7 +2551,15 @@ setInterval(() => {
 }, 60_000);
 // 天气每 10 分钟刷一次；服务端有 15 分钟缓存，不会真的每次都戳外网
 setInterval(updateWeather, 10 * 60_000);
-
+// iOS PWA：键盘弹出会把整页顶上去，收起后视口不复位，底下露一大块空白。
+// 光听 focusout 不够——键盘右下角的收起钮不触发 blur，得听 visualViewport 的尺寸变化
+window.addEventListener("focusout", () => setTimeout(() => window.scrollTo(0, 0), 60));
+if (window.visualViewport) {
+  window.visualViewport.addEventListener("resize", () => {
+    // 键盘收起（可视高度回到接近整屏）→ 把被顶走的页面拽回原位
+    if (window.visualViewport.height > window.innerHeight - 80) window.scrollTo(0, 0);
+  });
+}
 connect();
 loadSessions();
 if (sessionId) {
