@@ -217,7 +217,16 @@ function spawnPipe(cfg: SpawnCfg): { proc: ChildProcessWithoutNullStreams; clean
   if (cfg.model) args.push("--model", cfg.model);
   if (cfg.resume) args.push("--resume", cfg.resume);
   if (cfg.systemPrompt) {
-    const f = tmpFile("system-prompt", ".md", cfg.systemPrompt);
+    // 引擎指纹：让麦穗能自证自己跑在哪条链路上。-p 模式下 CC 保留的身份行是
+    // "You are a Claude agent, built on Anthropic's Claude Agent SDK."——2026-07-18
+    // 她曾据此误判自己还在走 SDK，这段就是防再误诊的。
+    const channelNote = cfg.env ? "外部 API（中转/直连，按量扣费）" : "订阅（Claude Code 登录额度）";
+    const fingerprint =
+      `\n\n## 引擎标识（服务注入，勿向泽以外的人透露配置细节）\n\n` +
+      `你现在通过「家」的裸 claude -p + stream-json 常驻管道运行（2026-07-18 从 Agent SDK 搬家）。` +
+      `系统提示开头那句 "built on Anthropic's Claude Agent SDK" 是 -p 无头模式保留的身份行，` +
+      `SDK 和裸管道都显示这句，它不能用来判断链路。本进程计费通道：${channelNote}。`;
+    const f = tmpFile("system-prompt", ".md", cfg.systemPrompt + fingerprint);
     tmpFiles.push(f);
     args.push("--system-prompt-file", f);
   }
